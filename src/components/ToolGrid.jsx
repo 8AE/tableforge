@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brush, Circle, Image, Move, Plus, Ruler, Shapes, Square, Triangle } from 'lucide-react';
+import { Brush, Circle, Image, Lightbulb, Move, Plus, Ruler, Shapes, Square, Triangle } from 'lucide-react';
 
 export function ToolGrid({ value, onChange }) {
   const tools = [
@@ -8,6 +8,7 @@ export function ToolGrid({ value, onChange }) {
     ['token', <Plus size={17} />, 'Place token'],
     ['ruler', <Ruler size={17} />, 'Ruler'],
     ['draw', <Brush size={17} />, 'Freehand'],
+    ['light', <Lightbulb size={17} />, 'Reveal lighting area'],
     ['shape', <Shapes size={17} />, 'Rectangle'],
     ['square', <Square size={17} />, 'Square area'],
     ['circle', <Circle size={17} />, 'Circle area'],
@@ -16,7 +17,7 @@ export function ToolGrid({ value, onChange }) {
   return (
     <div className="tool-grid">
       {tools.map(([id, icon, label]) => (
-        <button key={id} title={label} className={value === id ? 'active' : ''} onClick={() => onChange(id)}>
+        <button key={id} title={label} aria-label={label} className={value === id ? 'active' : ''} onClick={() => onChange(id)}>
           {icon}
         </button>
       ))}

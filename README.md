@@ -17,7 +17,9 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Create multiple saved boards and publish the active board to the player viewer.
 - Place and move tokens on a tile grid where each tile represents 5 feet.
 - Edit selected tokens, including color and uploaded token artwork.
+- Configure token vision distance for board lighting.
 - Duplicate or delete tokens and drawings from the right-click menu in the DM view.
+- Enable board lighting, manually reveal lit areas, and preview player visibility in the DM view.
 - Assign tokens to the player layer or DM-only layer.
 - Toggle token visibility.
 - Measure distance with a draggable ruler.
@@ -83,6 +85,7 @@ npm run preview
 
 - Copy selected token or drawing: `Cmd+C` / `Ctrl+C`
 - Paste copied token or drawing: `Cmd+V` / `Ctrl+V`
+- Delete selected token or drawing: `Delete` / `Backspace`
 - Undo: `Cmd+Z` / `Ctrl+Z`
 - Redo: `Cmd+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y`
 

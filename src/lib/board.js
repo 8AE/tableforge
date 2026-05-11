@@ -20,6 +20,11 @@ export function makeBoard(name = 'Blackstone Crossing') {
       scale: 1,
       opacity: 0.72,
     },
+    lighting: {
+      enabled: false,
+      darkness: 0.86,
+      reveals: [],
+    },
     tokens: [
       { id: 'hero-1', x: 5, y: 7, label: 'Kara', color: '#3ea7ff', layer: 'player', size: 1, visible: true },
       { id: 'hero-2', x: 7, y: 8, label: 'Brom', color: '#f2c94c', layer: 'player', size: 1, visible: true },
@@ -69,6 +74,17 @@ export function migrateState(raw) {
   if (raw?.boards?.length) {
     return {
       ...raw,
+      boards: raw.boards.map((board) => ({
+        ...board,
+        lighting: {
+          enabled: false,
+          darkness: 0.86,
+          reveals: [],
+          ...board.lighting,
+        },
+        tokens: (board.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', ...token })),
+        drawings: (board.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
+      })),
       playerBoardId: raw.playerBoardId || raw.activeBoardId || raw.boards[0].id,
     };
   }
@@ -84,7 +100,12 @@ export function migrateState(raw) {
         scale: raw.board.backgroundScale || 1,
         opacity: raw.board.backgroundOpacity ?? 0.72,
       },
-      tokens: raw.tokens || [],
+      lighting: {
+        enabled: false,
+        darkness: 0.86,
+        reveals: [],
+      },
+      tokens: (raw.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', ...token })),
       drawings: (raw.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
     };
     return { boards: [migrated], activeBoardId: migrated.id, playerBoardId: migrated.id };
@@ -159,6 +180,14 @@ export function shapeMeasurement(drawing) {
     return `${Math.max(box.w, box.h) * tileFeet} ft sq`;
   }
   return `${box.w * tileFeet} x ${box.h * tileFeet} ft`;
+}
+
+export function revealBox(reveal) {
+  const x = Math.min(reveal.start.x, reveal.end.x);
+  const y = Math.min(reveal.start.y, reveal.end.y);
+  const w = Math.abs(reveal.end.x - reveal.start.x) + 1;
+  const h = Math.abs(reveal.end.y - reveal.start.y) + 1;
+  return { x, y, w, h };
 }
 
 export function isPointInDrawing(point, drawing) {

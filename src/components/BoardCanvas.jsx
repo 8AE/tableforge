@@ -3,6 +3,7 @@ import {
   feetBetween,
   isPointInDrawing,
   normalizeBackground,
+  revealBox,
   shapeBox,
   shapeMeasurement,
   snapToTile,
@@ -22,6 +23,7 @@ export function BoardCanvas({
   onAddDrawing,
   onMoveDrawing,
   onMoveBackground,
+  onAddLightReveal,
   onDeleteSelection,
   onDuplicateSelection,
   fitToViewport = false,
@@ -39,6 +41,7 @@ export function BoardCanvas({
   const visibleTokens = board.tokens.filter((token) => view === 'dm' || (token.layer === 'player' && token.visible));
   const visibleDrawings = board.drawings.filter((drawing) => view === 'dm' || (drawing.layer === 'player' && drawing.visible !== false));
   const background = normalizeBackground(board.background);
+  const lighting = { enabled: false, darkness: 0.86, reveals: [], ...board.lighting };
 
   useEffect(() => {
     if (!fitToViewport || !shellRef.current) {
@@ -116,7 +119,7 @@ export function BoardCanvas({
       return;
     }
 
-    if (['ruler', 'square', 'circle', 'cone', 'shape'].includes(tool)) {
+    if (['ruler', 'square', 'circle', 'cone', 'shape', 'light'].includes(tool)) {
       setDrag({ type: tool, start: snapped, end: snapped });
       return;
     }
@@ -211,6 +214,13 @@ export function BoardCanvas({
         visible: true,
       });
     }
+    if (drag.type === 'light') {
+      onAddLightReveal({
+        id: uid('reveal'),
+        start: drag.start,
+        end: drag.end,
+      });
+    }
     if (['square', 'circle', 'cone', 'shape'].includes(drag.type)) {
       onAddDrawing({
         id: uid('shape'),
@@ -231,7 +241,7 @@ export function BoardCanvas({
   const liveDrawing = drag?.type === 'draw'
     ? [{ id: 'live-draw', type: 'path', points: drag.points, color: drawColor, strokeWidth: 4, layer: drawLayer }]
     : [];
-  const liveShape = drag && ['square', 'circle', 'cone', 'shape', 'ruler'].includes(drag.type) ? drag : null;
+  const liveShape = drag && ['square', 'circle', 'cone', 'shape', 'ruler', 'light'].includes(drag.type) ? drag : null;
 
   return (
     <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
@@ -273,9 +283,33 @@ export function BoardCanvas({
               <marker id="arrow" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
                 <path d="M0,0 L8,4 L0,8 Z" fill="#f8fafc" />
               </marker>
+              <mask id={`lighting-mask-${board.id}`}>
+                <rect x="0" y="0" width={width} height={height} fill="white" />
+                {lighting.reveals.map((reveal) => renderRevealHole(reveal, tile))}
+                {visibleTokens.filter((token) => token.layer === 'player' && token.visible && Number(token.visionFeet) > 0).map((token) => (
+                  <circle
+                    key={`vision-${token.id}`}
+                    cx={(token.x + token.size / 2) * tile}
+                    cy={(token.y + token.size / 2) * tile}
+                    r={(Number(token.visionFeet) / 5) * tile}
+                    fill="black"
+                  />
+                ))}
+              </mask>
             </defs>
             {[...visibleDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected))}
             {liveShape && renderLiveShape(liveShape, tile)}
+            {lighting.enabled && (
+              <rect
+                className={view === 'dm' ? 'lighting-preview' : 'lighting-darkness'}
+                x="0"
+                y="0"
+                width={width}
+                height={height}
+                fill={`rgba(0, 0, 0, ${lighting.darkness})`}
+                mask={`url(#lighting-mask-${board.id})`}
+              />
+            )}
           </svg>
 
           {visibleTokens.map((token) => (
@@ -370,6 +404,10 @@ function renderStoredShape(drawing, tile, isSelected = false) {
 function renderLiveShape(shape, tile) {
   const start = shape.start;
   const end = shape.end;
+  if (shape.type === 'light') {
+    const box = revealBox(shape);
+    return <rect key="live-light" className="live-light-reveal" x={box.x * tile} y={box.y * tile} width={box.w * tile} height={box.h * tile} rx="4" />;
+  }
   if (shape.type === 'ruler') {
     const x1 = (start.x + 0.5) * tile;
     const y1 = (start.y + 0.5) * tile;
@@ -392,6 +430,21 @@ function renderLiveShape(shape, tile) {
     start,
     end,
   }, tile);
+}
+
+function renderRevealHole(reveal, tile) {
+  const box = revealBox(reveal);
+  return (
+    <rect
+      key={`reveal-${reveal.id}`}
+      x={box.x * tile}
+      y={box.y * tile}
+      width={box.w * tile}
+      height={box.h * tile}
+      rx="8"
+      fill="black"
+    />
+  );
 }
 
 function MeasureLabel({ x, y, text }) {

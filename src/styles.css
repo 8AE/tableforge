@@ -96,6 +96,17 @@ label {
   font-size: 12px;
 }
 
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-row input {
+  width: auto;
+  min-height: auto;
+}
+
 input,
 select {
   width: 100%;
@@ -386,6 +397,22 @@ input[type="range"] {
   fill: #f8fafc;
   font-size: 13px;
   font-weight: 800;
+}
+
+.lighting-darkness {
+  pointer-events: none;
+}
+
+.lighting-preview {
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.live-light-reveal {
+  fill: rgba(242, 201, 76, 0.16);
+  stroke: #f2c94c;
+  stroke-width: 3;
+  stroke-dasharray: 8 5;
 }
 
 .map-token {

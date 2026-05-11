@@ -39,6 +39,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const updateBackground = (patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, background: { ...active.background, ...patch } })));
   };
+  const updateLighting = (patch) => {
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      lighting: { enabled: false, darkness: 0.86, reveals: [], ...active.lighting, ...patch },
+    })));
+  };
   const updateToken = (id, patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
@@ -92,7 +98,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const showBoardToPlayers = () => {
     setState((current) => ({ ...current, playerBoardId: current.activeBoardId }), { skipHistory: true });
-    publishProjectToPlayers(openProjectId);
+    window.setTimeout(() => publishProjectToPlayers(openProjectId), 320);
   };
 
   const clearDrawings = () => {
@@ -101,6 +107,20 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       drawings: active.drawings.filter((drawing) => drawing.layer !== drawLayer),
     })));
     setSelected(null);
+  };
+
+  const addLightReveal = (reveal) => {
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      lighting: {
+        ...{ enabled: false, darkness: 0.86, reveals: [], ...active.lighting },
+        reveals: [...(active.lighting?.reveals || []), reveal],
+      },
+    })));
+  };
+
+  const clearLightReveals = () => {
+    updateLighting({ reveals: [] });
   };
 
   const copySelection = () => {
@@ -155,9 +175,14 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   useEffect(() => {
     const onKeyDown = (event) => {
       const mod = event.metaKey || event.ctrlKey;
-      if (!mod) return;
       const tag = event.target?.tagName?.toLowerCase();
       if (['input', 'select', 'textarea'].includes(tag)) return;
+      if (['backspace', 'delete'].includes(event.key.toLowerCase()) && selected) {
+        event.preventDefault();
+        deleteSelection();
+        return;
+      }
+      if (!mod) return;
       if (event.key.toLowerCase() === 'c') {
         event.preventDefault();
         copySelection();
@@ -197,7 +222,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         </div>
 
         <Panel title="Project" icon={<Layers size={16} />}>
-          <button className="command" onClick={leaveProject}><Layers size={16} /> Project home</button>
+          <button className="command" title="Return to the project home screen" onClick={leaveProject}><Layers size={16} /> Project home</button>
         </Panel>
 
         <Panel title="Boards" icon={<Layers size={16} />}>
@@ -214,10 +239,22 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             ))}
           </div>
           <div className="split">
-            <button className="command" onClick={addBoard}><Plus size={16} /> New</button>
-            <button className="command" onClick={duplicateBoard}><Copy size={16} /> Duplicate</button>
+            <button className="command" title="Create a new empty board in this project" onClick={addBoard}><Plus size={16} /> New</button>
+            <button className="command" title="Duplicate the active board" onClick={duplicateBoard}><Copy size={16} /> Duplicate</button>
           </div>
-          <button className="command accent" onClick={showBoardToPlayers}><Send size={16} /> Show active board to players</button>
+          <button className="command accent" title="Publish the active board to the player viewer" onClick={showBoardToPlayers}><Send size={16} /> Show active board to players</button>
+        </Panel>
+
+        <Panel title="Lighting" icon={<EyeOff size={16} />}>
+          <label className="check-row" title="Darken the player board and reveal only lit areas">
+            <input type="checkbox" checked={Boolean(board.lighting?.enabled)} onChange={(event) => updateLighting({ enabled: event.target.checked })} />
+            Enable board lighting
+          </label>
+          <label title="How dark unrevealed player areas should be">
+            Darkness
+            <input type="range" min="0.35" max="0.98" step="0.01" value={board.lighting?.darkness ?? 0.86} onChange={(event) => updateLighting({ darkness: Number(event.target.value) })} />
+          </label>
+          <button className="command" title="Remove all manually revealed lighting areas" onClick={clearLightReveals}><Eraser size={16} /> Clear reveal areas</button>
         </Panel>
 
         <Panel title="Board" icon={<Image size={16} />}>
@@ -279,12 +316,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
         <Panel title="Shortcuts" icon={<Clipboard size={16} />}>
           <div className="shortcut-row">
-            <button className="command" onClick={copySelection} disabled={!selected}><Copy size={16} /> Copy</button>
-            <button className="command" onClick={pasteSelection} disabled={!clipboard}><Clipboard size={16} /> Paste</button>
+            <button className="command" title="Copy the selected token or drawing" onClick={copySelection} disabled={!selected}><Copy size={16} /> Copy</button>
+            <button className="command" title="Paste the copied token or drawing" onClick={pasteSelection} disabled={!clipboard}><Clipboard size={16} /> Paste</button>
           </div>
           <div className="shortcut-row">
-            <button className="command" onClick={undo} disabled={!canUndo}><Undo2 size={16} /> Undo</button>
-            <button className="command" onClick={redo} disabled={!canRedo}><Redo2 size={16} /> Redo</button>
+            <button className="command" title="Undo the last board edit" onClick={undo} disabled={!canUndo}><Undo2 size={16} /> Undo</button>
+            <button className="command" title="Redo the last undone board edit" onClick={redo} disabled={!canRedo}><Redo2 size={16} /> Redo</button>
           </div>
         </Panel>
 
@@ -326,9 +363,23 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               Token image
               <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateToken(selectedToken.id, { image }))} />
             </label>
+            <div className="split">
+              <label title="How far this token can see when board lighting is enabled">
+                Vision feet
+                <input type="number" min="0" step="5" value={selectedToken.visionFeet || 0} onChange={(event) => updateToken(selectedToken.id, { visionFeet: Number(event.target.value) })} />
+              </label>
+              <label title="Label this token's vision type">
+                Vision type
+                <select value={selectedToken.visionMode || 'darkvision'} onChange={(event) => updateToken(selectedToken.id, { visionMode: event.target.value })}>
+                  <option value="darkvision">Darkvision</option>
+                  <option value="lowlight">Low light</option>
+                  <option value="normal">Normal</option>
+                </select>
+              </label>
+            </div>
             <div className="shortcut-row">
-              <button className="command" onClick={() => duplicateSelection()}><Copy size={16} /> Duplicate</button>
-              <button className="command danger" onClick={() => deleteSelection()}><Trash2 size={16} /> Delete</button>
+              <button className="command" title="Duplicate the selected token" onClick={() => duplicateSelection()}><Copy size={16} /> Duplicate</button>
+              <button className="command danger" title="Delete the selected token" onClick={() => deleteSelection()}><Trash2 size={16} /> Delete</button>
             </div>
           </Panel>
         )}
@@ -406,6 +457,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onMoveDrawing={(id, dx, dy) => updateDrawing(id, offsetDrawing(board.drawings.find((drawing) => drawing.id === id), dx, dy))}
           onAddDrawing={addDrawing}
           onMoveBackground={(patch) => updateBackground(patch)}
+          onAddLightReveal={addLightReveal}
           onDeleteSelection={deleteSelection}
           onDuplicateSelection={duplicateSelection}
         />
