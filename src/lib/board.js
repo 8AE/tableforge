@@ -50,6 +50,21 @@ export const defaultState = {
   playerBoardId: firstBoard.id,
 };
 
+export function makeProject(name = 'New Campaign') {
+  const board = makeBoard();
+  return {
+    id: uid('project'),
+    name,
+    state: {
+      boards: [board],
+      activeBoardId: board.id,
+      playerBoardId: board.id,
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function migrateState(raw) {
   if (raw?.boards?.length) {
     return {

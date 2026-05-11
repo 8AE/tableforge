@@ -156,6 +156,11 @@ input[type="range"] {
   background: rgba(54, 211, 153, 0.15);
 }
 
+.command.danger {
+  border-color: rgba(223, 93, 82, 0.5);
+  background: rgba(223, 93, 82, 0.16);
+}
+
 .tool-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -338,6 +343,18 @@ input[type="range"] {
   user-select: none;
 }
 
+.background-resize-handle {
+  position: absolute;
+  z-index: 4;
+  width: 24px;
+  height: 24px;
+  border: 2px solid #f2c94c;
+  border-radius: 4px;
+  background: rgba(8, 17, 31, 0.78);
+  cursor: nwse-resize;
+  pointer-events: none;
+}
+
 .board::after {
   content: "";
   position: absolute;
@@ -385,11 +402,41 @@ input[type="range"] {
   text-align: center;
   line-height: 1.05;
   box-shadow: inset 0 -10px 22px rgba(0, 0, 0, 0.22), 0 8px 20px rgba(0, 0, 0, 0.3);
+  background-size: cover;
+  background-position: center;
 }
 
 .map-token span {
   max-width: 100%;
   overflow-wrap: anywhere;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.context-menu {
+  position: absolute;
+  z-index: 9;
+  min-width: 140px;
+  padding: 6px;
+  border: 1px solid rgba(245, 243, 237, 0.18);
+  border-radius: 8px;
+  background: rgba(8, 17, 31, 0.96);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu button {
+  width: 100%;
+  display: block;
+  color: #f5f3ed;
+  text-align: left;
+  border-radius: 5px;
+  background: transparent;
+  padding: 8px 10px;
+}
+
+.context-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .token-dm {
@@ -426,6 +473,70 @@ input[type="range"] {
 
 .app-player .board-fit {
   transform-origin: top left;
+  cursor: grab;
+}
+
+.app-player .board-fit:active {
+  cursor: grabbing;
+}
+
+.zoom-popover {
+  position: fixed;
+  right: 18px;
+  top: 76px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 250px;
+  padding: 10px;
+  border: 1px solid rgba(245, 243, 237, 0.16);
+  border-radius: 8px;
+  background: rgba(16, 20, 28, 0.92);
+}
+
+.empty-player,
+.project-launcher {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.empty-player > div,
+.project-card {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid rgba(245, 243, 237, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.empty-player strong,
+.project-card strong {
+  font-size: 22px;
+}
+
+.empty-player span,
+.project-card span {
+  color: #b7b0a2;
+}
+
+.project-list,
+.project-create {
+  display: grid;
+  gap: 8px;
+}
+
+.project-list button,
+.project-create button {
+  min-height: 38px;
+  color: #f5f3ed;
+  border: 1px solid rgba(245, 243, 237, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .app-player .fullscreen-active .topbar {

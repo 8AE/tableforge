@@ -22,28 +22,34 @@ export function BoardCanvas({
   onAddDrawing,
   onMoveDrawing,
   onMoveBackground,
+  onDeleteSelection,
+  onDuplicateSelection,
   fitToViewport = false,
+  playerZoom = 1,
 }) {
   const [drag, setDrag] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
   const shellRef = useRef(null);
-  const [scale, setScale] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const tile = board.tileSize;
   const width = board.columns * tile;
   const height = board.rows * tile;
+  const scale = fitScale * playerZoom;
   const visibleTokens = board.tokens.filter((token) => view === 'dm' || (token.layer === 'player' && token.visible));
   const visibleDrawings = board.drawings.filter((drawing) => view === 'dm' || (drawing.layer === 'player' && drawing.visible !== false));
   const background = normalizeBackground(board.background);
 
   useEffect(() => {
     if (!fitToViewport || !shellRef.current) {
-      setScale(1);
+      setFitScale(1);
       return undefined;
     }
     const shell = shellRef.current;
     const resize = () => {
       const rect = shell.getBoundingClientRect();
       const nextScale = Math.min(rect.width / width, rect.height / height, 1);
-      setScale(Math.max(0.2, nextScale));
+      setFitScale(Math.max(0.2, nextScale));
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -80,7 +86,10 @@ export function BoardCanvas({
     const drawing = drawingAt(point);
 
     if (tool === 'background') {
-      setDrag({ type: 'background', start: { x: point.px, y: point.py }, original: background });
+      const bgWidth = width * background.scale;
+      const bgHeight = height * background.scale;
+      const nearResize = point.px > background.x + bgWidth - 32 && point.py > background.y + bgHeight - 32;
+      setDrag({ type: nearResize ? 'background-resize' : 'background', start: { x: point.px, y: point.py }, original: background });
       setSelected(null);
       return;
     }
@@ -130,6 +139,17 @@ export function BoardCanvas({
       return;
     }
 
+    if (drag.type === 'background-resize') {
+      const nextWidth = Math.max(tile, point.px - drag.original.x);
+      onMoveBackground({ scale: nextWidth / width });
+      return;
+    }
+
+    if (drag.type === 'pan') {
+      setPan({ x: drag.original.x + event.clientX - drag.start.x, y: drag.original.y + event.clientY - drag.start.y });
+      return;
+    }
+
     if (drag.type === 'token') {
       onMoveToken(drag.id, {
         x: Math.max(0, Math.min(board.columns - 1, Math.floor(point.x - drag.offset.x))),
@@ -154,6 +174,28 @@ export function BoardCanvas({
     }
 
     setDrag({ ...drag, end: snapped });
+  };
+
+  const onBoardPointerDown = (event) => {
+    setContextMenu(null);
+    if (view === 'player') {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setDrag({ type: 'pan', start: { x: event.clientX, y: event.clientY }, original: pan });
+      return;
+    }
+    onPointerDown(event);
+  };
+
+  const onContextMenu = (event) => {
+    if (view !== 'dm') return;
+    event.preventDefault();
+    const point = pointFromEvent(event);
+    const token = tokenAt(point);
+    const drawing = drawingAt(point);
+    if (!token && !drawing) return;
+    const target = token ? { type: 'token', id: token.id } : { type: 'drawing', id: drawing.id };
+    setSelected(target);
+    setContextMenu({ x: point.px, y: point.py, target });
   };
 
   const onPointerUp = () => {
@@ -196,11 +238,12 @@ export function BoardCanvas({
       <div className="board-stage" style={{ width: width * scale, height: height * scale }}>
         <div
           className={`board ${fitToViewport ? 'board-fit' : ''}`}
-          style={{ width, height, '--tile': `${tile}px`, transform: `scale(${scale})` }}
-          onPointerDown={onPointerDown}
+          style={{ width, height, '--tile': `${tile}px`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
+          onPointerDown={onBoardPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={() => setDrag(null)}
+          onContextMenu={onContextMenu}
         >
           {background.src && (
             <img
@@ -213,6 +256,15 @@ export function BoardCanvas({
                 top: background.y,
                 width: width * background.scale,
                 opacity: background.opacity,
+              }}
+            />
+          )}
+          {tool === 'background' && view === 'dm' && background.src && (
+            <div
+              className="background-resize-handle"
+              style={{
+                left: background.x + width * background.scale - 12,
+                top: background.y + height * background.scale - 12,
               }}
             />
           )}
@@ -236,12 +288,19 @@ export function BoardCanvas({
                 width: token.size * tile,
                 height: token.size * tile,
                 background: token.color,
+                backgroundImage: token.image ? `url(${token.image})` : undefined,
               }}
               title={`${token.label} (${token.layer})`}
             >
               <span>{token.label}</span>
             </button>
           ))}
+          {contextMenu && (
+            <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+              <button onClick={() => { onDuplicateSelection(contextMenu.target); setContextMenu(null); }}>Duplicate</button>
+              <button onClick={() => { onDeleteSelection(contextMenu.target); setContextMenu(null); }}>Delete</button>
+            </div>
+          )}
         </div>
       </div>
     </div>

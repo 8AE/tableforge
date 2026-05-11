@@ -13,6 +13,7 @@ import {
   Plus,
   Redo2,
   Send,
+  Trash2,
   Undo2,
   Users,
 } from 'lucide-react';
@@ -22,7 +23,7 @@ import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
 import { getBoard, loadImage, makeBoard, offsetDrawing, uid, updateActiveBoard } from '../lib/board';
 
-export function DungeonMasterPortal({ state, setState, undo, redo, canUndo, canRedo }) {
+export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, createProject, openProject, undo, redo, canUndo, canRedo }) {
   const [tool, setTool] = useState('select');
   const [activeLayer, setActiveLayer] = useState('player');
   const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1 });
@@ -122,6 +123,34 @@ export function DungeonMasterPortal({ state, setState, undo, redo, canUndo, canR
     }
   };
 
+  const deleteSelection = (target = selected) => {
+    if (!target) return;
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      tokens: target.type === 'token' ? active.tokens.filter((token) => token.id !== target.id) : active.tokens,
+      drawings: target.type === 'drawing' ? active.drawings.filter((drawing) => drawing.id !== target.id) : active.drawings,
+    })));
+    setSelected(null);
+  };
+
+  const duplicateSelection = (target = selected) => {
+    if (!target) return;
+    if (target.type === 'token') {
+      const source = board.tokens.find((token) => token.id === target.id);
+      if (!source) return;
+      const token = { ...structuredClone(source), id: uid('token'), x: source.x + 1, y: source.y + 1 };
+      setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
+      setSelected({ type: 'token', id: token.id });
+    }
+    if (target.type === 'drawing') {
+      const source = board.drawings.find((drawing) => drawing.id === target.id);
+      if (!source) return;
+      const drawing = { ...structuredClone(source), ...offsetDrawing(source, 1, 1), id: uid('drawing') };
+      setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
+      setSelected({ type: 'drawing', id: drawing.id });
+    }
+  };
+
   useEffect(() => {
     const onKeyDown = (event) => {
       const mod = event.metaKey || event.ctrlKey;
@@ -153,6 +182,7 @@ export function DungeonMasterPortal({ state, setState, undo, redo, canUndo, canR
   }, [board, selected, clipboard, undo, redo]);
 
   const selectedDrawing = selected?.type === 'drawing' ? board.drawings.find((drawing) => drawing.id === selected.id) : null;
+  const selectedToken = selected?.type === 'token' ? board.tokens.find((token) => token.id === selected.id) : null;
 
   return (
     <>
@@ -164,6 +194,21 @@ export function DungeonMasterPortal({ state, setState, undo, redo, canUndo, canR
             <span>Dungeon master portal</span>
           </div>
         </div>
+
+        <Panel title="Projects" icon={<Layers size={16} />}>
+          <div className="board-list">
+            {projects.map((project) => (
+              <button
+                key={project.id}
+                className={project.id === openProjectId ? 'active' : ''}
+                onClick={() => openProject(project.id)}
+              >
+                <span>{project.name}</span>
+              </button>
+            ))}
+          </div>
+          <button className="command" onClick={() => createProject(`Project ${projects.length + 1}`)}><Plus size={16} /> New project</button>
+        </Panel>
 
         <Panel title="Boards" icon={<Layers size={16} />}>
           <div className="board-list">
@@ -270,6 +315,34 @@ export function DungeonMasterPortal({ state, setState, undo, redo, canUndo, canR
           </div>
         </Panel>
 
+        {selectedToken && (
+          <Panel title="Selected Token" icon={<MousePointer2 size={16} />}>
+            <label>
+              Label
+              <input value={selectedToken.label} onChange={(event) => updateToken(selectedToken.id, { label: event.target.value })} />
+            </label>
+            <div className="split">
+              <label>
+                Color
+                <input type="color" value={selectedToken.color} onChange={(event) => updateToken(selectedToken.id, { color: event.target.value })} />
+              </label>
+              <label>
+                Size
+                <input type="number" min="1" max="6" value={selectedToken.size} onChange={(event) => updateToken(selectedToken.id, { size: Number(event.target.value) })} />
+              </label>
+            </div>
+            <label className="file-button">
+              <Image size={16} />
+              Token image
+              <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateToken(selectedToken.id, { image }))} />
+            </label>
+            <div className="shortcut-row">
+              <button className="command" onClick={() => duplicateSelection()}><Copy size={16} /> Duplicate</button>
+              <button className="command danger" onClick={() => deleteSelection()}><Trash2 size={16} /> Delete</button>
+            </div>
+          </Panel>
+        )}
+
         <Panel title="Drawing" icon={<Brush size={16} />}>
           <div className="split">
             <label>
@@ -343,6 +416,8 @@ export function DungeonMasterPortal({ state, setState, undo, redo, canUndo, canR
           onMoveDrawing={(id, dx, dy) => updateDrawing(id, offsetDrawing(board.drawings.find((drawing) => drawing.id === id), dx, dy))}
           onAddDrawing={addDrawing}
           onMoveBackground={(patch) => updateBackground(patch)}
+          onDeleteSelection={deleteSelection}
+          onDuplicateSelection={duplicateSelection}
         />
       </section>
     </>
