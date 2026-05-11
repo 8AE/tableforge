@@ -1,6 +1,12 @@
 export const STORAGE_KEY = 'tableforge-board-state';
 export const CHANNEL_KEY = 'tableforge-board-sync';
 export const tileFeet = 5;
+export const defaultLighting = {
+  enabled: false,
+  darkness: 0.86,
+  reveals: [],
+  walls: [],
+};
 
 export function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -20,15 +26,11 @@ export function makeBoard(name = 'Blackstone Crossing') {
       scale: 1,
       opacity: 0.72,
     },
-    lighting: {
-      enabled: false,
-      darkness: 0.86,
-      reveals: [],
-    },
+    lighting: { ...defaultLighting },
     tokens: [
-      { id: 'hero-1', x: 5, y: 7, label: 'Kara', color: '#3ea7ff', layer: 'player', size: 1, visible: true },
-      { id: 'hero-2', x: 7, y: 8, label: 'Brom', color: '#f2c94c', layer: 'player', size: 1, visible: true },
-      { id: 'gm-1', x: 15, y: 5, label: 'Owlbear', color: '#df5d52', layer: 'dm', size: 2, visible: true },
+      { id: 'hero-1', x: 5, y: 7, label: 'Kara', color: '#3ea7ff', layer: 'player', size: 1, visible: true, visionEnabled: true },
+      { id: 'hero-2', x: 7, y: 8, label: 'Brom', color: '#f2c94c', layer: 'player', size: 1, visible: true, visionEnabled: true },
+      { id: 'gm-1', x: 15, y: 5, label: 'Owlbear', color: '#df5d52', layer: 'dm', size: 2, visible: true, visionEnabled: true },
     ],
     drawings: [
       {
@@ -76,13 +78,8 @@ export function migrateState(raw) {
       ...raw,
       boards: raw.boards.map((board) => ({
         ...board,
-        lighting: {
-          enabled: false,
-          darkness: 0.86,
-          reveals: [],
-          ...board.lighting,
-        },
-        tokens: (board.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', ...token })),
+        lighting: { ...defaultLighting, ...board.lighting, walls: board.lighting?.walls || [] },
+        tokens: (board.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', visionEnabled: true, ...token })),
         drawings: (board.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
       })),
       playerBoardId: raw.playerBoardId || raw.activeBoardId || raw.boards[0].id,
@@ -100,12 +97,8 @@ export function migrateState(raw) {
         scale: raw.board.backgroundScale || 1,
         opacity: raw.board.backgroundOpacity ?? 0.72,
       },
-      lighting: {
-        enabled: false,
-        darkness: 0.86,
-        reveals: [],
-      },
-      tokens: (raw.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', ...token })),
+      lighting: { ...defaultLighting },
+      tokens: (raw.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', visionEnabled: true, ...token })),
       drawings: (raw.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
     };
     return { boards: [migrated], activeBoardId: migrated.id, playerBoardId: migrated.id };
@@ -188,6 +181,80 @@ export function revealBox(reveal) {
   const w = Math.abs(reveal.end.x - reveal.start.x) + 1;
   const h = Math.abs(reveal.end.y - reveal.start.y) + 1;
   return { x, y, w, h };
+}
+
+export function wallEndpoints(wall, tile) {
+  return {
+    x1: (wall.start.x + 0.5) * tile,
+    y1: (wall.start.y + 0.5) * tile,
+    x2: (wall.end.x + 0.5) * tile,
+    y2: (wall.end.y + 0.5) * tile,
+  };
+}
+
+export function visionPolygonPoints(token, walls, tile) {
+  const radius = (Number(token.visionFeet) / tileFeet) * tile;
+  if (!radius) return '';
+
+  const origin = {
+    x: (token.x + token.size / 2) * tile,
+    y: (token.y + token.size / 2) * tile,
+  };
+  const wallSegments = (walls || []).map((wall) => wallEndpoints(wall, tile));
+  const angles = [];
+  const baseRayCount = 112;
+
+  for (let index = 0; index < baseRayCount; index += 1) {
+    angles.push((Math.PI * 2 * index) / baseRayCount);
+  }
+
+  wallSegments.forEach((wall) => {
+    [
+      { x: wall.x1, y: wall.y1 },
+      { x: wall.x2, y: wall.y2 },
+    ].forEach((point) => {
+      const angle = normalizeAngle(Math.atan2(point.y - origin.y, point.x - origin.x));
+      angles.push(angle - 0.0008, angle, angle + 0.0008);
+    });
+  });
+
+  return angles
+    .map(normalizeAngle)
+    .sort((a, b) => a - b)
+    .map((angle) => {
+      const distance = nearestWallDistance(origin, angle, radius, wallSegments);
+      return `${origin.x + Math.cos(angle) * distance},${origin.y + Math.sin(angle) * distance}`;
+    })
+    .join(' ');
+}
+
+function normalizeAngle(angle) {
+  return (angle + Math.PI * 2) % (Math.PI * 2);
+}
+
+function nearestWallDistance(origin, angle, radius, wallSegments) {
+  const ray = { x: Math.cos(angle), y: Math.sin(angle) };
+  return wallSegments.reduce((nearest, wall) => {
+    const hit = raySegmentDistance(origin, ray, wall);
+    return hit === null ? nearest : Math.min(nearest, hit);
+  }, radius);
+}
+
+function raySegmentDistance(origin, ray, wall) {
+  const segment = { x: wall.x2 - wall.x1, y: wall.y2 - wall.y1 };
+  const denominator = cross(ray, segment);
+  if (Math.abs(denominator) < 0.000001) return null;
+
+  const offset = { x: wall.x1 - origin.x, y: wall.y1 - origin.y };
+  const rayDistance = cross(offset, segment) / denominator;
+  const segmentRatio = cross(offset, ray) / denominator;
+
+  if (rayDistance < 0 || segmentRatio < 0 || segmentRatio > 1) return null;
+  return rayDistance;
+}
+
+function cross(a, b) {
+  return a.x * b.y - a.y * b.x;
 }
 
 export function isPointInDrawing(point, drawing) {

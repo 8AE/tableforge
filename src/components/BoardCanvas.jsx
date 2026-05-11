@@ -8,6 +8,8 @@ import {
   shapeMeasurement,
   snapToTile,
   uid,
+  visionPolygonPoints,
+  wallEndpoints,
 } from '../lib/board';
 
 export function BoardCanvas({
@@ -24,6 +26,7 @@ export function BoardCanvas({
   onMoveDrawing,
   onMoveBackground,
   onAddLightReveal,
+  onAddLightWall,
   onDeleteSelection,
   onDuplicateSelection,
   fitToViewport = false,
@@ -41,7 +44,7 @@ export function BoardCanvas({
   const visibleTokens = board.tokens.filter((token) => view === 'dm' || (token.layer === 'player' && token.visible));
   const visibleDrawings = board.drawings.filter((drawing) => view === 'dm' || (drawing.layer === 'player' && drawing.visible !== false));
   const background = normalizeBackground(board.background);
-  const lighting = { enabled: false, darkness: 0.86, reveals: [], ...board.lighting };
+  const lighting = { enabled: false, darkness: 0.86, reveals: [], walls: [], ...board.lighting };
 
   useEffect(() => {
     if (!fitToViewport || !shellRef.current) {
@@ -119,7 +122,7 @@ export function BoardCanvas({
       return;
     }
 
-    if (['ruler', 'square', 'circle', 'cone', 'shape', 'light'].includes(tool)) {
+    if (['ruler', 'square', 'circle', 'cone', 'shape', 'light', 'wall'].includes(tool)) {
       setDrag({ type: tool, start: snapped, end: snapped });
       return;
     }
@@ -221,6 +224,13 @@ export function BoardCanvas({
         end: drag.end,
       });
     }
+    if (drag.type === 'wall') {
+      onAddLightWall({
+        id: uid('wall'),
+        start: drag.start,
+        end: drag.end,
+      });
+    }
     if (['square', 'circle', 'cone', 'shape'].includes(drag.type)) {
       onAddDrawing({
         id: uid('shape'),
@@ -241,7 +251,7 @@ export function BoardCanvas({
   const liveDrawing = drag?.type === 'draw'
     ? [{ id: 'live-draw', type: 'path', points: drag.points, color: drawColor, strokeWidth: 4, layer: drawLayer }]
     : [];
-  const liveShape = drag && ['square', 'circle', 'cone', 'shape', 'ruler', 'light'].includes(drag.type) ? drag : null;
+  const liveShape = drag && ['square', 'circle', 'cone', 'shape', 'ruler', 'light', 'wall'].includes(drag.type) ? drag : null;
 
   return (
     <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
@@ -286,18 +296,17 @@ export function BoardCanvas({
               <mask id={`lighting-mask-${board.id}`}>
                 <rect x="0" y="0" width={width} height={height} fill="white" />
                 {lighting.reveals.map((reveal) => renderRevealHole(reveal, tile))}
-                {visibleTokens.filter((token) => token.layer === 'player' && token.visible && Number(token.visionFeet) > 0).map((token) => (
-                  <circle
+                {visibleTokens.filter((token) => token.layer === 'player' && token.visible && token.visionEnabled !== false && Number(token.visionFeet) > 0).map((token) => (
+                  <polygon
                     key={`vision-${token.id}`}
-                    cx={(token.x + token.size / 2) * tile}
-                    cy={(token.y + token.size / 2) * tile}
-                    r={(Number(token.visionFeet) / 5) * tile}
+                    points={visionPolygonPoints(token, lighting.walls, tile)}
                     fill="black"
                   />
                 ))}
               </mask>
             </defs>
             {[...visibleDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected))}
+            {view === 'dm' && lighting.walls.map((wall) => renderLightingWall(wall, tile))}
             {liveShape && renderLiveShape(liveShape, tile)}
             {lighting.enabled && (
               <rect
@@ -404,6 +413,9 @@ function renderStoredShape(drawing, tile, isSelected = false) {
 function renderLiveShape(shape, tile) {
   const start = shape.start;
   const end = shape.end;
+  if (shape.type === 'wall') {
+    return renderLightingWall({ id: 'live-wall', start, end }, tile, true);
+  }
   if (shape.type === 'light') {
     const box = revealBox(shape);
     return <rect key="live-light" className="live-light-reveal" x={box.x * tile} y={box.y * tile} width={box.w * tile} height={box.h * tile} rx="4" />;
@@ -430,6 +442,17 @@ function renderLiveShape(shape, tile) {
     start,
     end,
   }, tile);
+}
+
+function renderLightingWall(wall, tile, isLive = false) {
+  const points = wallEndpoints(wall, tile);
+  return (
+    <g key={`wall-${wall.id}`} className={isLive ? 'live-light-wall' : 'lighting-wall'}>
+      <line x1={points.x1} y1={points.y1} x2={points.x2} y2={points.y2} />
+      <circle cx={points.x1} cy={points.y1} r="5" />
+      <circle cx={points.x2} cy={points.y2} r="5" />
+    </g>
+  );
 }
 
 function renderRevealHole(reveal, tile) {

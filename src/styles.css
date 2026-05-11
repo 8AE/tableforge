@@ -415,6 +415,26 @@ input[type="range"] {
   stroke-dasharray: 8 5;
 }
 
+.lighting-wall line,
+.live-light-wall line {
+  stroke: #ff6b4a;
+  stroke-width: 6;
+  stroke-linecap: round;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.4));
+}
+
+.lighting-wall circle,
+.live-light-wall circle {
+  fill: #ff6b4a;
+  stroke: #fff7ed;
+  stroke-width: 2;
+}
+
+.live-light-wall {
+  opacity: 0.78;
+  stroke-dasharray: 8 5;
+}
+
 .map-token {
   position: absolute;
   z-index: 3;

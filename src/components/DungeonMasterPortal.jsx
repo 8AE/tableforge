@@ -21,7 +21,7 @@ import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
 import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
-import { getBoard, loadImage, makeBoard, offsetDrawing, uid, updateActiveBoard } from '../lib/board';
+import { defaultLighting, getBoard, loadImage, makeBoard, offsetDrawing, uid, updateActiveBoard } from '../lib/board';
 
 export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, undo, redo, canUndo, canRedo }) {
   const [tool, setTool] = useState('select');
@@ -42,7 +42,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const updateLighting = (patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
-      lighting: { enabled: false, darkness: 0.86, reveals: [], ...active.lighting, ...patch },
+      lighting: { ...defaultLighting, ...active.lighting, ...patch },
     })));
   };
   const updateToken = (id, patch) => {
@@ -68,6 +68,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       layer: activeLayer,
       size: Number(tokenDraft.size) || 1,
       visible: true,
+      visionEnabled: true,
     };
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     setSelected({ type: 'token', id: token.id });
@@ -113,14 +114,28 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
       lighting: {
-        ...{ enabled: false, darkness: 0.86, reveals: [], ...active.lighting },
+        ...{ ...defaultLighting, ...active.lighting },
         reveals: [...(active.lighting?.reveals || []), reveal],
+      },
+    })));
+  };
+
+  const addLightWall = (wall) => {
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      lighting: {
+        ...{ ...defaultLighting, ...active.lighting },
+        walls: [...(active.lighting?.walls || []), wall],
       },
     })));
   };
 
   const clearLightReveals = () => {
     updateLighting({ reveals: [] });
+  };
+
+  const clearLightWalls = () => {
+    updateLighting({ walls: [] });
   };
 
   const copySelection = () => {
@@ -255,6 +270,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <input type="range" min="0.35" max="0.98" step="0.01" value={board.lighting?.darkness ?? 0.86} onChange={(event) => updateLighting({ darkness: Number(event.target.value) })} />
           </label>
           <button className="command" title="Remove all manually revealed lighting areas" onClick={clearLightReveals}><Eraser size={16} /> Clear reveal areas</button>
+          <button className="command" title="Remove all lighting walls from this board" onClick={clearLightWalls}><Eraser size={16} /> Clear light walls</button>
         </Panel>
 
         <Panel title="Board" icon={<Image size={16} />}>
@@ -363,6 +379,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               Token image
               <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateToken(selectedToken.id, { image }))} />
             </label>
+            <label className="check-row" title="Toggle whether this token reveals darkness with its vision distance">
+              <input type="checkbox" checked={selectedToken.visionEnabled !== false} onChange={(event) => updateToken(selectedToken.id, { visionEnabled: event.target.checked })} />
+              Vision enabled
+            </label>
             <div className="split">
               <label title="How far this token can see when board lighting is enabled">
                 Vision feet
@@ -458,6 +478,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onAddDrawing={addDrawing}
           onMoveBackground={(patch) => updateBackground(patch)}
           onAddLightReveal={addLightReveal}
+          onAddLightWall={addLightWall}
           onDeleteSelection={deleteSelection}
           onDuplicateSelection={duplicateSelection}
         />

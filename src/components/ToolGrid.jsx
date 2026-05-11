@@ -1,5 +1,5 @@
 import React from 'react';
-import { Brush, Circle, Image, Lightbulb, Move, Plus, Ruler, Shapes, Square, Triangle } from 'lucide-react';
+import { BrickWall, Brush, Circle, Image, Lightbulb, Move, Plus, Ruler, Shapes, Square, Triangle } from 'lucide-react';
 
 export function ToolGrid({ value, onChange }) {
   const tools = [
@@ -9,6 +9,7 @@ export function ToolGrid({ value, onChange }) {
     ['ruler', <Ruler size={17} />, 'Ruler'],
     ['draw', <Brush size={17} />, 'Freehand'],
     ['light', <Lightbulb size={17} />, 'Reveal lighting area'],
+    ['wall', <BrickWall size={17} />, 'Draw light-blocking wall'],
     ['shape', <Shapes size={17} />, 'Rectangle'],
     ['square', <Square size={17} />, 'Square area'],
     ['circle', <Circle size={17} />, 'Circle area'],
