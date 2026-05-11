@@ -530,6 +530,13 @@ input[type="range"] {
   gap: 8px;
 }
 
+.project-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .project-list button,
 .project-create button {
   min-height: 38px;
@@ -537,6 +544,15 @@ input[type="range"] {
   border: 1px solid rgba(245, 243, 237, 0.15);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.07);
+}
+
+.danger-text {
+  border-color: rgba(223, 93, 82, 0.45) !important;
+  color: #ffb4aa !important;
+}
+
+.form-error {
+  color: #ffb4aa;
 }
 
 .app-player .fullscreen-active .topbar {

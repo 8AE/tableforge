@@ -296,7 +296,7 @@ export function BoardCanvas({
             </button>
           ))}
           {contextMenu && (
-            <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+            <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
               <button onClick={() => { onDuplicateSelection(contextMenu.target); setContextMenu(null); }}>Duplicate</button>
               <button onClick={() => { onDeleteSelection(contextMenu.target); setContextMenu(null); }}>Delete</button>
             </div>

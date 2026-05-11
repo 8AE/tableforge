@@ -1,21 +1,50 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CHANNEL_KEY, makeProject, migrateState } from '../lib/board';
 
+function isNewer(a, b) {
+  return new Date(a?.updatedAt || 0).getTime() > new Date(b?.updatedAt || 0).getTime();
+}
+
 export function useSyncedBoard() {
   const [projects, setProjects] = useState([]);
-  const [openProjectId, setOpenProjectId] = useState(null);
+  const [playerProjectId, setPlayerProjectId] = useState(null);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
   const [past, setPast] = useState([]);
   const [future, setFuture] = useState([]);
   const channelRef = useRef(null);
   const saveTimerRef = useRef(null);
-  const state = projects.find((project) => project.id === openProjectId)?.state || null;
+  const pendingSaveRef = useRef(null);
+  const projectsRef = useRef(projects);
+  const selectedProjectIdRef = useRef(selectedProjectId);
+
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
+
+  useEffect(() => {
+    selectedProjectIdRef.current = selectedProjectId;
+  }, [selectedProjectId]);
+
+  const state = projects.find((project) => project.id === selectedProjectId)?.state || null;
+  const playerState = projects.find((project) => project.id === playerProjectId)?.state || null;
+
+  const mergeProjects = useCallback((incomingProjects) => {
+    const current = projectsRef.current;
+    return incomingProjects.map((incoming) => {
+      const local = current.find((project) => project.id === incoming.id);
+      if (pendingSaveRef.current === incoming.id && local && isNewer(local, incoming)) return local;
+      return incoming;
+    });
+  }, []);
 
   const applyProjectPayload = useCallback((payload) => {
-    setProjects(payload.projects || []);
-    setOpenProjectId(payload.openProjectId || null);
+    const incomingProjects = payload.projects || [];
+    setProjects(mergeProjects(incomingProjects));
+    setPlayerProjectId(payload.openProjectId || null);
     setIsLoading(false);
-  }, []);
+  }, [mergeProjects]);
 
   const fetchProjects = useCallback(async () => {
     const response = await fetch('/api/projects');
@@ -26,14 +55,12 @@ export function useSyncedBoard() {
     const channel = new BroadcastChannel(CHANNEL_KEY);
     channelRef.current = channel;
     channel.onmessage = (event) => {
-      if (event.data?.type === 'projects') {
-        applyProjectPayload(event.data.payload);
-      }
+      if (event.data?.type === 'projects') applyProjectPayload(event.data.payload);
     };
     fetchProjects().catch(() => setIsLoading(false));
     const poll = window.setInterval(() => {
       fetchProjects().catch(() => {});
-    }, 1500);
+    }, 2500);
     return () => {
       channel.close();
       window.clearInterval(poll);
@@ -41,42 +68,96 @@ export function useSyncedBoard() {
     };
   }, [applyProjectPayload, fetchProjects]);
 
+  const commitPayload = (payload) => {
+    applyProjectPayload(payload);
+    channelRef.current?.postMessage({ type: 'projects', payload });
+  };
+
+  const saveProject = async (project) => {
+    pendingSaveRef.current = project.id;
+    const response = await fetch(`/api/projects/${project.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(project),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      setError(body.error || 'Unable to save project.');
+      return;
+    }
+    const payload = await response.json();
+    pendingSaveRef.current = null;
+    commitPayload(payload);
+  };
+
   const persistProject = (project) => {
+    pendingSaveRef.current = project.id;
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(async () => {
-      const response = await fetch(`/api/projects/${project.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(project),
-      });
-      const payload = await response.json();
-      channelRef.current?.postMessage({ type: 'projects', payload });
-    }, 180);
+    saveTimerRef.current = window.setTimeout(() => saveProject(project), 250);
   };
 
   const createProject = async (name) => {
-    const project = makeProject(name);
+    setError('');
+    const project = makeProject(name.trim() || 'New Campaign');
     const response = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(project),
     });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      setError(body.error || 'Unable to create project.');
+      return;
+    }
     const payload = await response.json();
-    applyProjectPayload(payload);
-    channelRef.current?.postMessage({ type: 'projects', payload });
+    setSelectedProjectId(project.id);
+    setPast([]);
+    setFuture([]);
+    commitPayload(payload);
   };
 
   const openProject = async (id) => {
-    const response = await fetch(`/api/projects/${id}/open`, { method: 'POST' });
-    const payload = await response.json();
-    applyProjectPayload(payload);
+    setSelectedProjectId(id);
     setPast([]);
     setFuture([]);
-    channelRef.current?.postMessage({ type: 'projects', payload });
   };
 
-  const publishProject = (nextState) => {
-    const nextProject = projects.find((project) => project.id === openProjectId);
+  const leaveProject = () => {
+    setSelectedProjectId(null);
+    setPast([]);
+    setFuture([]);
+  };
+
+  const renameProject = async (id, name) => {
+    setError('');
+    const project = projectsRef.current.find((item) => item.id === id);
+    if (!project) return;
+    await saveProject({ ...project, name: name.trim(), updatedAt: new Date().toISOString() });
+  };
+
+  const deleteProject = async (id) => {
+    setError('');
+    const response = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    if (!response.ok) {
+      setError('Unable to delete project.');
+      return;
+    }
+    const payload = await response.json();
+    if (selectedProjectIdRef.current === id) setSelectedProjectId(null);
+    setPast([]);
+    setFuture([]);
+    commitPayload(payload);
+  };
+
+  const publishProjectToPlayers = async (id = selectedProjectId) => {
+    if (!id) return;
+    const response = await fetch(`/api/projects/${id}/open`, { method: 'POST' });
+    const payload = await response.json();
+    commitPayload(payload);
+  };
+
+  const publishProjectState = (nextState) => {
+    const nextProject = projectsRef.current.find((project) => project.id === selectedProjectIdRef.current);
     if (!nextProject) return;
     const updatedProject = { ...nextProject, state: nextState, updatedAt: new Date().toISOString() };
     setProjects((items) => items.map((project) => project.id === updatedProject.id ? updatedProject : project));
@@ -91,7 +172,7 @@ export function useSyncedBoard() {
       setPast((items) => [...items.slice(-39), current]);
       setFuture([]);
     }
-    publishProject(next);
+    publishProjectState(next);
   };
 
   const undo = () => {
@@ -99,7 +180,7 @@ export function useSyncedBoard() {
       if (!items.length || !state) return items;
       const previous = items[items.length - 1];
       setFuture((futureItems) => [state, ...futureItems.slice(0, 39)]);
-      publishProject(previous);
+      publishProjectState(previous);
       return items.slice(0, -1);
     });
   };
@@ -109,19 +190,26 @@ export function useSyncedBoard() {
       if (!items.length || !state) return items;
       const next = items[0];
       setPast((pastItems) => [...pastItems.slice(-39), state]);
-      publishProject(next);
+      publishProjectState(next);
       return items.slice(1);
     });
   };
 
   return {
     state,
+    playerState,
     projects,
-    openProjectId,
+    selectedProjectId,
+    playerProjectId,
     isLoading,
+    error,
     setState,
     createProject,
     openProject,
+    leaveProject,
+    renameProject,
+    deleteProject,
+    publishProjectToPlayers,
     undo,
     redo,
     canUndo: past.length > 0,

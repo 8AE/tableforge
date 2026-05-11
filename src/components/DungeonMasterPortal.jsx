@@ -23,7 +23,7 @@ import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
 import { getBoard, loadImage, makeBoard, offsetDrawing, uid, updateActiveBoard } from '../lib/board';
 
-export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, createProject, openProject, undo, redo, canUndo, canRedo }) {
+export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, undo, redo, canUndo, canRedo }) {
   const [tool, setTool] = useState('select');
   const [activeLayer, setActiveLayer] = useState('player');
   const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1 });
@@ -92,6 +92,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const showBoardToPlayers = () => {
     setState((current) => ({ ...current, playerBoardId: current.activeBoardId }), { skipHistory: true });
+    publishProjectToPlayers(openProjectId);
   };
 
   const clearDrawings = () => {
@@ -195,19 +196,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           </div>
         </div>
 
-        <Panel title="Projects" icon={<Layers size={16} />}>
-          <div className="board-list">
-            {projects.map((project) => (
-              <button
-                key={project.id}
-                className={project.id === openProjectId ? 'active' : ''}
-                onClick={() => openProject(project.id)}
-              >
-                <span>{project.name}</span>
-              </button>
-            ))}
-          </div>
-          <button className="command" onClick={() => createProject(`Project ${projects.length + 1}`)}><Plus size={16} /> New project</button>
+        <Panel title="Project" icon={<Layers size={16} />}>
+          <button className="command" onClick={leaveProject}><Layers size={16} /> Project home</button>
         </Panel>
 
         <Panel title="Boards" icon={<Layers size={16} />}>

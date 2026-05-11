@@ -13,7 +13,7 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Upload a board background image and adjust its scale and opacity.
 - Move the board background image on its own background layer.
 - Resize the board background image by dragging it in background edit mode.
-- Create and open projects that contain saved boards.
+- Create, rename, delete, and open projects that contain saved boards. Project names must be unique.
 - Create multiple saved boards and publish the active board to the player viewer.
 - Place and move tokens on a tile grid where each tile represents 5 feet.
 - Edit selected tokens, including color and uploaded token artwork.
@@ -70,6 +70,7 @@ npm run preview
 ## Usage Notes
 
 - The DM must create or open a project before the player viewer shows a board.
+- The DM starts on the project home screen, opens one project at a time, and can return home with **Project home**.
 - Projects are saved on the host machine in `data/projects.json`.
 - Use **Show active board to players** in the DM portal to transition the player viewer to a different board.
 - DM-layer tokens are visible in the DM portal but hidden from the player viewer.

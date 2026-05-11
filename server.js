@@ -33,6 +33,10 @@ app.get('/api/projects', async (_request, response) => {
 app.post('/api/projects', async (request, response) => {
   const data = await readProjects();
   const project = request.body;
+  if (data.projects.some((item) => item.name.trim().toLowerCase() === project.name.trim().toLowerCase())) {
+    response.status(409).json({ error: 'A project with that name already exists.' });
+    return;
+  }
   data.projects.push(project);
   data.openProjectId = project.id;
   await writeProjects(data);
@@ -41,7 +45,21 @@ app.post('/api/projects', async (request, response) => {
 
 app.put('/api/projects/:id', async (request, response) => {
   const data = await readProjects();
+  if (data.projects.some((project) => project.id !== request.params.id && project.name.trim().toLowerCase() === request.body.name.trim().toLowerCase())) {
+    response.status(409).json({ error: 'A project with that name already exists.' });
+    return;
+  }
   data.projects = data.projects.map((project) => project.id === request.params.id ? request.body : project);
+  await writeProjects(data);
+  response.json(data);
+});
+
+app.delete('/api/projects/:id', async (request, response) => {
+  const data = await readProjects();
+  data.projects = data.projects.filter((project) => project.id !== request.params.id);
+  if (data.openProjectId === request.params.id) {
+    data.openProjectId = null;
+  }
   await writeProjects(data);
   response.json(data);
 });
