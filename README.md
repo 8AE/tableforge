@@ -11,13 +11,17 @@ The current app runs entirely in the browser. Board state is saved in `localStor
 
 - Create a board with custom tile width, tile height, and tile pixel size.
 - Upload a board background image and adjust its scale and opacity.
+- Move the board background image on its own background layer.
+- Create multiple saved boards and publish the active board to the player viewer.
 - Place and move tokens on a tile grid where each tile represents 5 feet.
 - Assign tokens to the player layer or DM-only layer.
 - Toggle token visibility.
 - Measure distance with a draggable ruler.
 - Draw freehand annotations.
-- Draw square, circular, rectangular, and cone area shapes.
+- Draw, move, recolor, hide, and reveal annotations.
+- Draw square, circular, rectangular, and cone area shapes with measurements.
 - Open a fullscreen-friendly player display at the same time as the DM portal.
+- Use keyboard shortcuts for copy, paste, undo, and redo in the DM portal.
 
 ## Getting Started
 
@@ -60,9 +64,18 @@ npm run preview
 ## Usage Notes
 
 - Keep the DM portal and player viewer open in the same browser profile to get live synchronization.
+- Use **Show active board to players** in the DM portal to transition the player viewer to a different board.
 - DM-layer tokens are visible in the DM portal but hidden from the player viewer.
-- Player-layer drawings and tokens are visible in the player viewer.
-- The player viewer includes a fullscreen button for tabletop display use.
+- DM-layer drawings can be prepared privately and later moved to the player layer or revealed.
+- Player-layer drawings and tokens are visible in the player viewer when not hidden.
+- The player viewer includes a fullscreen button for tabletop display use. In fullscreen, its top bar hides until the pointer moves to the top of the screen.
+
+## Keyboard Shortcuts
+
+- Copy selected token or drawing: `Cmd+C` / `Ctrl+C`
+- Paste copied token or drawing: `Cmd+V` / `Ctrl+V`
+- Undo: `Cmd+Z` / `Ctrl+Z`
+- Redo: `Cmd+Shift+Z`, `Ctrl+Shift+Z`, or `Ctrl+Y`
 
 ## Tech Stack
 
