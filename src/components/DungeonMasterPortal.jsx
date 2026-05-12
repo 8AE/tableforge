@@ -927,6 +927,8 @@ function flattenMapData(data, baseUrl) {
           height: Number(image.height) || 0,
           grid: image.grid || null,
           mapRegions: image.mapRegions || parentImage?.mapRegions || [],
+          mapRegionWidth: Number(image.mapRegions ? image.width : parentImage?.width) || Number(image.width) || 0,
+          mapRegionHeight: Number(image.mapRegions ? image.height : parentImage?.height) || Number(image.height) || 0,
           searchText: [
             displayTitle,
             rawTitle,
@@ -967,13 +969,15 @@ function getMapBoardDimensions(map) {
 }
 
 function getMapRegionWalls(map, dimensions) {
-  if (!map.width || !map.height || !map.mapRegions?.length) return [];
+  const regionWidth = map.mapRegionWidth || map.width;
+  const regionHeight = map.mapRegionHeight || map.height;
+  if (!regionWidth || !regionHeight || !map.mapRegions?.length) return [];
   const walls = [];
   const seen = new Set();
 
   map.mapRegions.forEach((region, regionIndex) => {
     const points = (region.points || [])
-      .map((point) => pointToBoard(point, map, dimensions))
+      .map((point) => pointToBoard(point, regionWidth, regionHeight, dimensions))
       .filter(Boolean);
 
     if (points.length < 2) return;
@@ -995,11 +999,11 @@ function getMapRegionWalls(map, dimensions) {
   return walls;
 }
 
-function pointToBoard(point, map, dimensions) {
+function pointToBoard(point, regionWidth, regionHeight, dimensions) {
   if (!Array.isArray(point) || point.length < 2) return null;
   return {
-    x: clampWallCoordinate((Number(point[0]) / map.width) * dimensions.columns, dimensions.columns),
-    y: clampWallCoordinate((Number(point[1]) / map.height) * dimensions.rows, dimensions.rows),
+    x: clampWallCoordinate((Number(point[0]) / regionWidth) * dimensions.columns, dimensions.columns),
+    y: clampWallCoordinate((Number(point[1]) / regionHeight) * dimensions.rows, dimensions.rows),
   };
 }
 
