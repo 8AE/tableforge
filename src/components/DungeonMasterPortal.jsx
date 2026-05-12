@@ -39,6 +39,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const updateBackground = (patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, background: { ...active.background, ...patch } })));
   };
+  const toggleBackgroundFit = (enabled) => {
+    updateBackground(enabled ? { fitToBoard: true, x: 0, y: 0, scale: 1 } : { fitToBoard: false });
+  };
   const updateLighting = (patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
@@ -331,10 +334,14 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             Background image
             <input type="file" accept="image/*" onChange={(event) => loadImage(event, (src) => updateBackground({ src }))} />
           </label>
+          <label className="check-row" title="Keep the background image stretched to the board's full width and height">
+            <input type="checkbox" checked={Boolean(board.background.fitToBoard)} onChange={(event) => toggleBackgroundFit(event.target.checked)} />
+            Fit background to board
+          </label>
           <div className="split">
             <label>
               Scale
-              <input type="number" step="0.05" min="0.1" max="5" value={board.background.scale} onChange={(event) => updateBackground({ scale: Number(event.target.value) })} />
+              <input type="number" step="0.05" min="0.1" max="5" value={board.background.scale} onChange={(event) => updateBackground({ scale: Number(event.target.value) })} disabled={Boolean(board.background.fitToBoard)} />
             </label>
             <label>
               Opacity
@@ -344,11 +351,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           <div className="split">
             <label>
               X offset
-              <input type="number" value={Math.round(board.background.x)} onChange={(event) => updateBackground({ x: Number(event.target.value) })} />
+              <input type="number" value={Math.round(board.background.x)} onChange={(event) => updateBackground({ x: Number(event.target.value) })} disabled={Boolean(board.background.fitToBoard)} />
             </label>
             <label>
               Y offset
-              <input type="number" value={Math.round(board.background.y)} onChange={(event) => updateBackground({ y: Number(event.target.value) })} />
+              <input type="number" value={Math.round(board.background.y)} onChange={(event) => updateBackground({ y: Number(event.target.value) })} disabled={Boolean(board.background.fitToBoard)} />
             </label>
           </div>
         </Panel>

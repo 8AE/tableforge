@@ -26,6 +26,7 @@ export function makeBoard(name = 'Blackstone Crossing') {
       y: 0,
       scale: 1,
       opacity: 0.72,
+      fitToBoard: false,
     },
     lighting: { ...defaultLighting },
     tokens: [
@@ -102,6 +103,7 @@ export function migrateState(raw) {
         y: 0,
         scale: raw.board.backgroundScale || 1,
         opacity: raw.board.backgroundOpacity ?? 0.72,
+        fitToBoard: false,
       },
       lighting: { ...defaultLighting },
       tokens: (raw.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', visionEnabled: true, ...token })),
@@ -135,9 +137,9 @@ export function updateActiveBoard(state, updater) {
 
 export function normalizeBackground(background) {
   if (typeof background === 'string') {
-    return { src: background, x: 0, y: 0, scale: 1, opacity: 0.72 };
+    return { src: background, x: 0, y: 0, scale: 1, opacity: 0.72, fitToBoard: false };
   }
-  return { src: '', x: 0, y: 0, scale: 1, opacity: 0.72, ...background };
+  return { src: '', x: 0, y: 0, scale: 1, opacity: 0.72, fitToBoard: false, ...background };
 }
 
 export function snapToTile(point, board) {

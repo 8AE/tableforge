@@ -11,6 +11,7 @@ The app is designed to run on one host machine. Projects are stored on that host
 
 - Create a board with custom tile width, tile height, and tile pixel size.
 - Upload a board background image and adjust its scale and opacity.
+- Keep a board background image fitted to the full board size as tile dimensions change.
 - Move the board background image on its own background layer.
 - Resize the board background image by dragging it in background edit mode.
 - Create, rename, delete, and open projects that contain saved boards. Project names must be unique.

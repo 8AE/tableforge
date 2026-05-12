@@ -107,11 +107,16 @@ export function BoardCanvas({
     const drawing = drawingAt(point);
     const wall = wallAt(point);
 
-    if (tool === 'background') {
+    if (tool === 'background' && !background.fitToBoard) {
       const bgWidth = width * background.scale;
       const bgHeight = height * background.scale;
       const nearResize = point.px > background.x + bgWidth - 32 && point.py > background.y + bgHeight - 32;
       setDrag({ type: nearResize ? 'background-resize' : 'background', start: { x: point.px, y: point.py }, original: background });
+      setSelected(null);
+      return;
+    }
+
+    if (tool === 'background') {
       setSelected(null);
       return;
     }
@@ -318,14 +323,16 @@ export function BoardCanvas({
               alt=""
               draggable="false"
               style={{
-                left: background.x,
-                top: background.y,
-                width: width * background.scale,
+                left: background.fitToBoard ? 0 : background.x,
+                top: background.fitToBoard ? 0 : background.y,
+                width: background.fitToBoard ? width : width * background.scale,
+                height: background.fitToBoard ? height : undefined,
+                objectFit: background.fitToBoard ? 'fill' : undefined,
                 opacity: background.opacity,
               }}
             />
           )}
-          {tool === 'background' && view === 'dm' && background.src && (
+          {tool === 'background' && view === 'dm' && background.src && !background.fitToBoard && (
             <div
               className="background-resize-handle"
               style={{
