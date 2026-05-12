@@ -26,8 +26,11 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Measure distance with a draggable ruler.
 - Draw freehand annotations.
 - Draw, move, recolor, hide, and reveal annotations.
+- Manage tokens and drawings from collapsible DM sidebar lists.
 - Draw square, circular, rectangular, and cone area shapes with measurements.
+- Move and delete light-blocking walls.
 - Open a fullscreen-friendly player display at the same time as the DM portal.
+- Zoom the player display up to 1000% and rotate it in 90-degree increments for table-mounted screens.
 - Use keyboard shortcuts for copy, paste, undo, and redo in the DM portal.
 
 ## Getting Started

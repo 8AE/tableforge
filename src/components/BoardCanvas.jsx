@@ -29,11 +29,13 @@ export function BoardCanvas({
   onMoveBackground,
   onAddLightReveal,
   onAddLightWall,
+  onMoveLightWall,
   onRemoveLightReveal,
   onDeleteSelection,
   onDuplicateSelection,
   fitToViewport = false,
   playerZoom = 1,
+  playerRotation = 0,
 }) {
   const [drag, setDrag] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
@@ -44,6 +46,11 @@ export function BoardCanvas({
   const width = board.columns * tile;
   const height = board.rows * tile;
   const scale = fitScale * playerZoom;
+  const normalizedRotation = ((playerRotation % 360) + 360) % 360;
+  const isRotatedSideways = normalizedRotation === 90 || normalizedRotation === 270;
+  const stageWidth = (isRotatedSideways ? height : width) * scale;
+  const stageHeight = (isRotatedSideways ? width : height) * scale;
+  const rotationOffset = getRotationOffset(normalizedRotation, width, height, scale);
   const background = normalizeBackground(board.background);
   const lighting = { enabled: false, darkness: 0.86, reveals: [], hiddenReveals: [], walls: [], ...board.lighting };
   const visibleTokens = useMemo(
@@ -146,6 +153,7 @@ export function BoardCanvas({
 
     if (tool === 'select' && wall) {
       setSelected({ type: 'wall', id: wall.id });
+      setDrag({ type: 'wall-move', id: wall.id, start: snapped, original: structuredClone(wall), preview: structuredClone(wall) });
       return;
     }
 
@@ -205,6 +213,20 @@ export function BoardCanvas({
       return;
     }
 
+    if (drag.type === 'wall-move') {
+      const dx = snapped.x - drag.start.x;
+      const dy = snapped.y - drag.start.y;
+      setDrag({
+        ...drag,
+        preview: {
+          ...drag.original,
+          start: { x: drag.original.start.x + dx, y: drag.original.start.y + dy },
+          end: { x: drag.original.end.x + dx, y: drag.original.end.y + dy },
+        },
+      });
+      return;
+    }
+
     if (drag.type === 'draw') {
       setDrag({ ...drag, points: [...drag.points, point] });
       return;
@@ -244,6 +266,9 @@ export function BoardCanvas({
     }
     if (drag.type === 'drawing' && (drag.dx || drag.dy)) {
       onMoveDrawing(drag.id, drag.dx, drag.dy);
+    }
+    if (drag.type === 'wall-move') {
+      onMoveLightWall(drag.id, drag.preview);
     }
     if (drag.type === 'draw' && drag.points.length > 1) {
       onAddDrawing({
@@ -303,13 +328,21 @@ export function BoardCanvas({
   const displayDrawings = visibleDrawings.map((drawing) => (
     drag?.type === 'drawing' && drag.id === drawing.id ? { ...drawing, ...offsetDrawing(drawing, drag.dx, drag.dy) } : drawing
   ));
+  const displayWalls = lighting.walls.map((wall) => (
+    drag?.type === 'wall-move' && drag.id === wall.id ? drag.preview : wall
+  ));
 
   return (
     <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
-      <div className="board-stage" style={{ width: width * scale, height: height * scale }}>
+      <div className="board-stage" style={{ width: stageWidth, height: stageHeight }}>
         <div
           className={`board ${fitToViewport ? 'board-fit' : ''}`}
-          style={{ width, height, '--tile': `${tile}px`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
+          style={{
+            width,
+            height,
+            '--tile': `${tile}px`,
+            transform: `translate(${pan.x}px, ${pan.y}px) translate(${rotationOffset.x}px, ${rotationOffset.y}px) rotate(${normalizedRotation}deg) scale(${scale})`,
+          }}
           onPointerDown={onBoardPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -360,7 +393,7 @@ export function BoardCanvas({
               </mask>
             </defs>
             {[...displayDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected))}
-            {view === 'dm' && lighting.walls.map((wall) => renderLightingWall(wall, tile, selected))}
+            {view === 'dm' && displayWalls.map((wall) => renderLightingWall(wall, tile, selected))}
             {liveShape && renderLiveShape(liveShape, tile)}
             {lighting.enabled && (
               <rect
@@ -523,6 +556,13 @@ function renderRevealHole(reveal, tile, fill = 'black') {
       fill={fill}
     />
   );
+}
+
+function getRotationOffset(rotation, width, height, scale) {
+  if (rotation === 90) return { x: height * scale, y: 0 };
+  if (rotation === 180) return { x: width * scale, y: height * scale };
+  if (rotation === 270) return { x: 0, y: width * scale };
+  return { x: 0, y: 0 };
 }
 
 function MeasureLabel({ x, y, text }) {

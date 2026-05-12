@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
   Brush,
+  ChevronDown,
+  ChevronRight,
   Clipboard,
   Copy,
   Eraser,
@@ -31,6 +33,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [drawLayer, setDrawLayer] = useState('player');
   const [selected, setSelected] = useState(null);
   const [clipboard, setClipboard] = useState(null);
+  const [tokensExpanded, setTokensExpanded] = useState(true);
+  const [drawingsExpanded, setDrawingsExpanded] = useState(true);
   const board = getBoard(state, state.activeBoardId);
 
   const updateBoard = (patch) => {
@@ -135,6 +139,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     })));
   };
 
+  const moveLightWall = (id, wall) => {
+    updateLighting({ walls: (board.lighting?.walls || []).map((item) => item.id === id ? wall : item) });
+  };
+
   const removeLightReveal = (area) => {
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
@@ -156,7 +164,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const copySelection = () => {
     const item = selected?.type === 'token'
       ? board.tokens.find((token) => token.id === selected.id)
-      : board.drawings.find((drawing) => drawing.id === selected?.id);
+      : selected?.type === 'drawing'
+        ? board.drawings.find((drawing) => drawing.id === selected.id)
+        : board.lighting?.walls?.find((wall) => wall.id === selected?.id);
     if (item) setClipboard({ type: selected.type, item: structuredClone(item) });
   };
 
@@ -490,21 +500,53 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         </Panel>
 
         <Panel title="Tokens" icon={<Layers size={16} />}>
-          <div className="token-list">
-            {board.tokens.map((token) => (
-              <div className="token-row" key={token.id}>
-                <span className="swatch" style={{ background: token.color }} />
-                <input value={token.label} onChange={(event) => updateToken(token.id, { label: event.target.value })} />
-                <button title="Toggle layer visibility" onClick={() => updateToken(token.id, { visible: !token.visible })}>
-                  {token.visible ? <Eye size={15} /> : <EyeOff size={15} />}
-                </button>
-                <select value={token.layer} onChange={(event) => updateToken(token.id, { layer: event.target.value })}>
-                  <option value="player">Player</option>
-                  <option value="dm">DM</option>
-                </select>
-              </div>
-            ))}
-          </div>
+          <button className="list-toggle" title="Show or hide the token list" onClick={() => setTokensExpanded((expanded) => !expanded)}>
+            {tokensExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} {tokensExpanded ? 'Hide tokens' : `Show tokens (${board.tokens.length})`}
+          </button>
+          {tokensExpanded && (
+            <div className="asset-list">
+              {board.tokens.map((token) => (
+                <div className="asset-row token-row" key={token.id}>
+                  <span className="swatch" style={{ background: token.color }} />
+                  <input value={token.label} onChange={(event) => updateToken(token.id, { label: event.target.value })} onFocus={() => setSelected({ type: 'token', id: token.id })} />
+                  <button title="Toggle token visibility" onClick={() => updateToken(token.id, { visible: !token.visible })}>
+                    {token.visible ? <Eye size={15} /> : <EyeOff size={15} />}
+                  </button>
+                  <select value={token.layer} onChange={(event) => updateToken(token.id, { layer: event.target.value })}>
+                    <option value="player">Player</option>
+                    <option value="dm">DM</option>
+                  </select>
+                  <button className="danger-icon" title="Delete token" onClick={() => deleteSelection({ type: 'token', id: token.id })}><Trash2 size={15} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Drawings" icon={<Brush size={16} />}>
+          <button className="list-toggle" title="Show or hide the drawing list" onClick={() => setDrawingsExpanded((expanded) => !expanded)}>
+            {drawingsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} {drawingsExpanded ? 'Hide drawings' : `Show drawings (${board.drawings.length})`}
+          </button>
+          {drawingsExpanded && (
+            <div className="asset-list">
+              {board.drawings.map((drawing, index) => (
+                <div className="asset-row drawing-row" key={drawing.id}>
+                  <span className="swatch square-swatch" style={{ background: drawing.color }} />
+                  <button className="asset-name" title="Select drawing" onClick={() => setSelected({ type: 'drawing', id: drawing.id })}>
+                    {drawing.type === 'path' ? 'Freehand' : drawing.shape || 'Shape'} {index + 1}
+                  </button>
+                  <button title="Toggle drawing visibility" onClick={() => updateDrawing(drawing.id, { visible: drawing.visible === false })}>
+                    {drawing.visible === false ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                  <select value={drawing.layer} onChange={(event) => updateDrawing(drawing.id, { layer: event.target.value })}>
+                    <option value="player">Player</option>
+                    <option value="dm">DM</option>
+                  </select>
+                  <button className="danger-icon" title="Delete drawing" onClick={() => deleteSelection({ type: 'drawing', id: drawing.id })}><Trash2 size={15} /></button>
+                </div>
+              ))}
+            </div>
+          )}
         </Panel>
       </aside>
 
@@ -526,6 +568,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onMoveBackground={(patch) => updateBackground(patch)}
           onAddLightReveal={addLightReveal}
           onAddLightWall={addLightWall}
+          onMoveLightWall={moveLightWall}
           onRemoveLightReveal={removeLightReveal}
           onDeleteSelection={deleteSelection}
           onDuplicateSelection={duplicateSelection}

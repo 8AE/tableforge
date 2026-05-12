@@ -197,7 +197,7 @@ input[type="range"] {
 }
 
 .tool-grid button,
-.token-row button {
+.asset-row button {
   height: 36px;
   display: grid;
   place-items: center;
@@ -233,7 +233,7 @@ input[type="range"] {
   background: rgba(255, 255, 255, 0.05);
 }
 
-.token-list,
+.asset-list,
 .board-list {
   display: grid;
   gap: 8px;
@@ -279,22 +279,66 @@ input[type="range"] {
   font-size: 13px;
 }
 
-.token-row {
+.list-toggle {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #f5f3ed;
+  border: 1px solid rgba(245, 243, 237, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.asset-row {
   display: grid;
-  grid-template-columns: 18px 1fr 36px 86px;
   gap: 8px;
   align-items: center;
 }
 
-.token-row input,
-.token-row select {
+.token-row {
+  grid-template-columns: 18px 1fr 36px 86px 36px;
+}
+
+.drawing-row {
+  grid-template-columns: 18px 1fr 36px 86px 36px;
+}
+
+.asset-row input,
+.asset-row select,
+.asset-name {
   min-height: 32px;
+}
+
+.asset-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: #f5f3ed;
+  text-align: left;
+  border: 1px solid rgba(245, 243, 237, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .swatch {
   width: 16px;
   height: 16px;
   border-radius: 50%;
+}
+
+.square-swatch {
+  border-radius: 4px;
+}
+
+.danger-icon {
+  border-color: rgba(223, 93, 82, 0.4) !important;
+  background: rgba(223, 93, 82, 0.14) !important;
 }
 
 .workspace,
