@@ -40,7 +40,10 @@ export function useSyncedBoard() {
   }, []);
 
   const applyProjectPayload = useCallback((payload) => {
-    const incomingProjects = payload.projects || [];
+    const incomingProjects = (payload.projects || []).map((project) => ({
+      ...project,
+      state: migrateState(project.state),
+    }));
     setProjects(mergeProjects(incomingProjects));
     setPlayerProjectId(payload.openProjectId || null);
     setIsLoading(false);

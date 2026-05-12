@@ -23,7 +23,14 @@ async function readProjects() {
 
 async function writeProjects(data) {
   await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(dataFile, JSON.stringify(data, null, 2));
+  const tempFile = path.join(dataDir, `projects.${process.pid}.${Date.now()}.tmp`);
+  try {
+    await fs.writeFile(tempFile, JSON.stringify(data, null, 2));
+    await fs.rename(tempFile, dataFile);
+  } catch (error) {
+    await fs.rm(tempFile, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 app.get('/api/projects', async (_request, response) => {

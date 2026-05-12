@@ -54,7 +54,11 @@ export function BoardCanvas({
   const rotationOffset = getRotationOffset(normalizedRotation, width, height, scale);
   const background = normalizeBackground(board.background);
   const lighting = { enabled: false, darkness: 0.86, reveals: [], hiddenReveals: [], walls: [], ...board.lighting };
-  const visibleTokens = useMemo(
+  const playerTokens = useMemo(
+    () => board.tokens.filter((token) => token.layer === 'player' && token.visible),
+    [board.tokens],
+  );
+  const dmTokens = useMemo(
     () => board.tokens.filter((token) => view === 'dm' || (token.layer === 'player' && token.visible)),
     [board.tokens, view],
   );
@@ -63,10 +67,14 @@ export function BoardCanvas({
     [board.drawings, view],
   );
   const visionPolygons = useMemo(() => (
-    visibleTokens
+    playerTokens
       .filter((token) => token.layer === 'player' && token.visible && token.visionEnabled !== false && Number(token.visionFeet) > 0)
       .map((token) => ({ id: token.id, points: visionPolygonPoints(token, lighting.walls, tile) }))
-  ), [visibleTokens, lighting.walls, tile]);
+  ), [playerTokens, lighting.walls, tile]);
+  const visibleTokens = useMemo(() => {
+    if (view === 'dm' || !lighting.enabled) return dmTokens;
+    return dmTokens.filter((token) => tokenHasVision(token) || tokenIsInRevealedLight(token, lighting, visionPolygons, tile));
+  }, [dmTokens, lighting, tile, view, visionPolygons]);
 
   useEffect(() => {
     if (!fitToViewport || !shellRef.current) {
@@ -560,6 +568,50 @@ function renderRevealHole(reveal, tile, fill = 'black') {
       fill={fill}
     />
   );
+}
+
+function tokenHasVision(token) {
+  return token.visionEnabled !== false && Number(token.visionFeet) > 0;
+}
+
+function tokenIsInRevealedLight(token, lighting, visionPolygons, tile) {
+  const point = {
+    x: token.x + token.size / 2,
+    y: token.y + token.size / 2,
+  };
+  const inReveal = (lighting.reveals || []).some((reveal) => pointInBox(point, revealBox(reveal)));
+  const hiddenByReveal = (lighting.hiddenReveals || []).some((reveal) => pointInBox(point, revealBox(reveal)));
+  if (inReveal && !hiddenByReveal) return true;
+
+  return visionPolygons.some((polygon) => pointInPolygonPixels(
+    { x: point.x * tile, y: point.y * tile },
+    polygon.points,
+  ));
+}
+
+function pointInBox(point, box) {
+  return point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+}
+
+function pointInPolygonPixels(point, polygonPoints) {
+  const points = polygonPoints
+    .split(' ')
+    .filter(Boolean)
+    .map((pair) => {
+      const [x, y] = pair.split(',').map(Number);
+      return { x, y };
+    });
+  if (points.length < 3) return false;
+
+  let inside = false;
+  for (let current = 0, previous = points.length - 1; current < points.length; previous = current, current += 1) {
+    const a = points[current];
+    const b = points[previous];
+    if (((a.y > point.y) !== (b.y > point.y)) && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 function getRotationOffset(rotation, width, height, scale) {
