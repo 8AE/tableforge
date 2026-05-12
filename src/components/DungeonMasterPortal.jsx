@@ -13,12 +13,14 @@ import {
   Library,
   Layers,
   MousePointer2,
+  Pencil,
   Plus,
   Redo2,
   Send,
   Trash2,
   Undo2,
   Users,
+  X,
 } from 'lucide-react';
 import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
@@ -36,7 +38,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [clipboard, setClipboard] = useState(null);
   const [tokensExpanded, setTokensExpanded] = useState(true);
   const [drawingsExpanded, setDrawingsExpanded] = useState(true);
-  const [libraryExpanded, setLibraryExpanded] = useState(true);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [editingLibraryTokenId, setEditingLibraryTokenId] = useState(null);
   const [bestiaryQuery, setBestiaryQuery] = useState('');
   const [bestiaryResults, setBestiaryResults] = useState([]);
   const [bestiaryError, setBestiaryError] = useState('');
@@ -124,6 +127,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const deleteLibraryToken = (id) => {
     updateTokenLibrary((items) => items.filter((token) => token.id !== id));
+    if (editingLibraryTokenId === id) setEditingLibraryTokenId(null);
   };
 
   const saveBestiaryMonsterToLibrary = (monster) => {
@@ -541,99 +545,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         )}
 
         <Panel title="Token Library" icon={<Library size={16} />}>
-          <button className="list-toggle" title="Show or hide the project token library" onClick={() => setLibraryExpanded((expanded) => !expanded)}>
-            {libraryExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} {libraryExpanded ? 'Hide library' : `Show library (${tokenLibrary.length})`}
+          <button className="command accent" title="Open the project-wide token library" onClick={() => setIsLibraryOpen(true)}>
+            <Library size={16} /> Open token library ({tokenLibrary.length})
           </button>
-          {libraryExpanded && (
-            <div className="library-list">
-              <button className="command accent" title="Save the selected board token into this project's token library" onClick={saveSelectedTokenToLibrary} disabled={!selectedToken}>
-                <Copy size={16} /> Save selected token
-              </button>
-              <div className="bestiary-search">
-                <label>
-                  5e.tools base URL
-                  <input value={state.fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => updateFiveEToolsBaseUrl(event.target.value)} />
-                </label>
-                <label>
-                  Search bestiary
-                  <input value={bestiaryQuery} onChange={(event) => setBestiaryQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchBestiary(); }} placeholder="Goblin, dragon, bandit..." />
-                </label>
-                <button className="command" title="Search the 5e.tools bestiary data files" onClick={searchBestiary} disabled={isSearchingBestiary}>
-                  <Library size={16} /> {isSearchingBestiary ? 'Searching...' : 'Search bestiary'}
-                </button>
-                {bestiaryError && <p className="form-error">{bestiaryError}</p>}
-                {bestiaryResults.length > 0 && (
-                  <div className="bestiary-results">
-                    {bestiaryResults.map((monster) => (
-                      <div className="bestiary-result" key={`${monster.source}-${monster.name}`}>
-                        <div>
-                          <strong>{monster.name}</strong>
-                          <span>{monster.source} · CR {formatMonsterCr(monster)} · {formatMonsterSize(monster)}</span>
-                        </div>
-                        <button className="command" title="Save this bestiary monster into the project token library" onClick={() => saveBestiaryMonsterToLibrary(monster)}>
-                          <Plus size={15} /> Save
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {tokenLibrary.map((libraryToken) => (
-                <div className="library-token-card" key={libraryToken.id}>
-                  <div className="library-token-header">
-                    <span className={`library-token-preview ${libraryToken.image ? 'has-image' : ''}`} style={{ backgroundColor: libraryToken.image ? 'transparent' : libraryToken.color }}>
-                      {libraryToken.image ? <img src={libraryToken.image} alt="" /> : libraryToken.label.slice(0, 2)}
-                    </span>
-                    <input value={libraryToken.label} onChange={(event) => updateLibraryToken(libraryToken.id, { label: event.target.value })} />
-                  </div>
-                  <div className="split">
-                    <label>
-                      Color
-                      <input type="color" value={libraryToken.color} onChange={(event) => updateLibraryToken(libraryToken.id, { color: event.target.value })} />
-                    </label>
-                    <label>
-                      Size
-                      <input type="number" min="1" max="6" value={libraryToken.size} onChange={(event) => updateLibraryToken(libraryToken.id, { size: Number(event.target.value) })} />
-                    </label>
-                  </div>
-                  <label className="file-button">
-                    <Image size={16} />
-                    Token image
-                    <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateLibraryToken(libraryToken.id, { image }))} />
-                  </label>
-                  <div className="split">
-                    <label>
-                      Layer
-                      <select value={libraryToken.layer} onChange={(event) => updateLibraryToken(libraryToken.id, { layer: event.target.value })}>
-                        <option value="player">Player</option>
-                        <option value="dm">DM</option>
-                      </select>
-                    </label>
-                    <label>
-                      Vision feet
-                      <input type="number" min="0" step="5" value={libraryToken.visionFeet || 0} onChange={(event) => updateLibraryToken(libraryToken.id, { visionFeet: Number(event.target.value) })} />
-                    </label>
-                  </div>
-                  <label>
-                    Vision type
-                    <select value={libraryToken.visionMode || 'darkvision'} onChange={(event) => updateLibraryToken(libraryToken.id, { visionMode: event.target.value })}>
-                      <option value="darkvision">Darkvision</option>
-                      <option value="lowlight">Low light</option>
-                      <option value="normal">Normal</option>
-                    </select>
-                  </label>
-                  <label className="check-row">
-                    <input type="checkbox" checked={libraryToken.visionEnabled !== false} onChange={(event) => updateLibraryToken(libraryToken.id, { visionEnabled: event.target.checked })} />
-                    Vision enabled
-                  </label>
-                  <div className="shortcut-row">
-                    <button className="command" title="Import this library token onto the active board" onClick={() => importLibraryToken(libraryToken)}><Plus size={16} /> Import</button>
-                    <button className="command danger" title="Remove this token from the project library" onClick={() => deleteLibraryToken(libraryToken.id)}><Trash2 size={16} /> Remove</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </Panel>
 
         <Panel title="Drawing" icon={<Brush size={16} />}>
@@ -723,6 +637,133 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           )}
         </Panel>
       </aside>
+
+      {isLibraryOpen && (
+        <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Token library">
+          <div className="library-modal">
+            <header className="library-modal-header">
+              <div>
+                <strong>Token Library</strong>
+                <span>{tokenLibrary.length} saved tokens in this project</span>
+              </div>
+              <button title="Close token library" onClick={() => setIsLibraryOpen(false)}><X size={18} /></button>
+            </header>
+
+            <div className="library-modal-tools">
+              <button className="command accent" title="Save the selected board token into this project's token library" onClick={saveSelectedTokenToLibrary} disabled={!selectedToken}>
+                <Copy size={16} /> Save selected token
+              </button>
+              <div className="bestiary-search">
+                <label>
+                  5e.tools base URL
+                  <input value={state.fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => updateFiveEToolsBaseUrl(event.target.value)} />
+                </label>
+                <label>
+                  Search bestiary
+                  <input value={bestiaryQuery} onChange={(event) => setBestiaryQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchBestiary(); }} placeholder="Goblin, dragon, bandit..." />
+                </label>
+                <button className="command" title="Search the 5e.tools bestiary data files" onClick={searchBestiary} disabled={isSearchingBestiary}>
+                  <Library size={16} /> {isSearchingBestiary ? 'Searching...' : 'Search bestiary'}
+                </button>
+                {bestiaryError && <p className="form-error">{bestiaryError}</p>}
+                {bestiaryResults.length > 0 && (
+                  <div className="bestiary-results">
+                    {bestiaryResults.map((monster) => (
+                      <div className="bestiary-result" key={`${monster.source}-${monster.name}`}>
+                        <div>
+                          <strong>{monster.name}</strong>
+                          <span>{monster.source} · CR {formatMonsterCr(monster)} · {formatMonsterSize(monster)}</span>
+                        </div>
+                        <button className="command" title="Save this bestiary monster into the project token library" onClick={() => saveBestiaryMonsterToLibrary(monster)}>
+                          <Plus size={15} /> Save
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="library-grid">
+              {tokenLibrary.map((libraryToken) => {
+                const isEditing = editingLibraryTokenId === libraryToken.id;
+                return (
+                  <div className="library-token-card" key={libraryToken.id}>
+                    <div className="library-grid-token">
+                      <span className={`library-token-preview large ${libraryToken.image ? 'has-image' : ''}`} style={{ backgroundColor: libraryToken.image ? 'transparent' : libraryToken.color }}>
+                        {libraryToken.image ? <img src={libraryToken.image} alt="" /> : libraryToken.label.slice(0, 2)}
+                      </span>
+                      <div>
+                        <strong>{libraryToken.label}</strong>
+                        <span>{libraryToken.layer} · size {libraryToken.size} · vision {libraryToken.visionFeet || 0} ft</span>
+                      </div>
+                    </div>
+                    <div className="library-card-actions">
+                      <button className="command" title="Import this library token onto the active board" onClick={() => importLibraryToken(libraryToken)}><Plus size={16} /> Import</button>
+                      <button className="command" title="Edit this library token" onClick={() => setEditingLibraryTokenId(isEditing ? null : libraryToken.id)}><Pencil size={16} /> Edit</button>
+                      <button className="command danger" title="Remove this token from the project library" onClick={() => deleteLibraryToken(libraryToken.id)}><Trash2 size={16} /> Delete</button>
+                    </div>
+                    {isEditing && (
+                      <div className="library-token-editor">
+                        <label>
+                          Name
+                          <input value={libraryToken.label} onChange={(event) => updateLibraryToken(libraryToken.id, { label: event.target.value })} />
+                        </label>
+                        <div className="split">
+                          <label>
+                            Color
+                            <input type="color" value={libraryToken.color} onChange={(event) => updateLibraryToken(libraryToken.id, { color: event.target.value })} />
+                          </label>
+                          <label>
+                            Size
+                            <input type="number" min="1" max="6" value={libraryToken.size} onChange={(event) => updateLibraryToken(libraryToken.id, { size: Number(event.target.value) })} />
+                          </label>
+                        </div>
+                        <label className="file-button">
+                          <Image size={16} />
+                          Token image
+                          <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateLibraryToken(libraryToken.id, { image }))} />
+                        </label>
+                        <div className="split">
+                          <label>
+                            Layer
+                            <select value={libraryToken.layer} onChange={(event) => updateLibraryToken(libraryToken.id, { layer: event.target.value })}>
+                              <option value="player">Player</option>
+                              <option value="dm">DM</option>
+                            </select>
+                          </label>
+                          <label>
+                            Vision feet
+                            <input type="number" min="0" step="5" value={libraryToken.visionFeet || 0} onChange={(event) => updateLibraryToken(libraryToken.id, { visionFeet: Number(event.target.value) })} />
+                          </label>
+                        </div>
+                        <label>
+                          Vision type
+                          <select value={libraryToken.visionMode || 'darkvision'} onChange={(event) => updateLibraryToken(libraryToken.id, { visionMode: event.target.value })}>
+                            <option value="darkvision">Darkvision</option>
+                            <option value="lowlight">Low light</option>
+                            <option value="normal">Normal</option>
+                          </select>
+                        </label>
+                        <label className="check-row">
+                          <input type="checkbox" checked={libraryToken.visionEnabled !== false} onChange={(event) => updateLibraryToken(libraryToken.id, { visionEnabled: event.target.checked })} />
+                          Vision enabled
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {!tokenLibrary.length && (
+                <div className="library-empty">
+                  <strong>No saved tokens yet</strong>
+                  <span>Save a selected board token or search the 5e.tools bestiary to start building this project library.</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="workspace">
         <Topbar board={board} mode="dm" />
