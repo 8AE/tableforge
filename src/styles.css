@@ -305,6 +305,44 @@ input[type="range"] {
   margin-top: 12px;
 }
 
+.bestiary-search {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(245, 243, 237, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.bestiary-results {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.bestiary-result {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  gap: 8px;
+  align-items: center;
+}
+
+.bestiary-result strong,
+.bestiary-result span {
+  display: block;
+}
+
+.bestiary-result strong {
+  color: #f5f3ed;
+  font-size: 13px;
+}
+
+.bestiary-result span {
+  color: #b7b0a2;
+  font-size: 12px;
+}
+
 .library-token-card {
   display: grid;
   gap: 10px;

@@ -19,6 +19,7 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Place and move tokens on a tile grid where each tile represents 5 feet.
 - Edit selected tokens, including color and uploaded token artwork.
 - Save tokens to a project-wide token library, edit saved library tokens, and import them onto any board in the project.
+- Search a 5e.tools bestiary, including custom locally hosted 5e.tools base URLs, and save monsters into the project token library.
 - Configure token vision distance and quickly toggle token vision on or off for board lighting.
 - Duplicate or delete tokens and drawings from the right-click menu in the DM view.
 - Enable board lighting, manually reveal lit areas, draw light-blocking walls, and preview player visibility in the DM view.

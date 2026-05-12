@@ -37,6 +37,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [tokensExpanded, setTokensExpanded] = useState(true);
   const [drawingsExpanded, setDrawingsExpanded] = useState(true);
   const [libraryExpanded, setLibraryExpanded] = useState(true);
+  const [bestiaryQuery, setBestiaryQuery] = useState('');
+  const [bestiaryResults, setBestiaryResults] = useState([]);
+  const [bestiaryError, setBestiaryError] = useState('');
+  const [isSearchingBestiary, setIsSearchingBestiary] = useState(false);
   const board = getBoard(state, state.activeBoardId);
   const tokenLibrary = state.tokenLibrary || [];
 
@@ -72,6 +76,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       ...current,
       tokenLibrary: typeof updater === 'function' ? updater(current.tokenLibrary || []) : updater,
     }));
+  };
+  const updateFiveEToolsBaseUrl = (baseUrl) => {
+    setState((current) => ({ ...current, fiveEToolsBaseUrl: baseUrl }), { skipHistory: true });
   };
 
   const addToken = (point) => {
@@ -117,6 +124,48 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const deleteLibraryToken = (id) => {
     updateTokenLibrary((items) => items.filter((token) => token.id !== id));
+  };
+
+  const saveBestiaryMonsterToLibrary = (monster) => {
+    updateTokenLibrary((items) => [...items, normalizeLibraryToken({
+      id: uid('library-token'),
+      label: monster.name,
+      color: monsterColor(monster),
+      image: monsterTokenImage(state.fiveEToolsBaseUrl, monster),
+      layer: 'dm',
+      size: monsterTokenSize(monster),
+      visionFeet: monsterVisionFeet(monster),
+      visionMode: monsterVisionFeet(monster) ? 'darkvision' : 'normal',
+      visionEnabled: Boolean(monsterVisionFeet(monster)),
+    })]);
+  };
+
+  const searchBestiary = async () => {
+    const query = bestiaryQuery.trim().toLowerCase();
+    if (!query) return;
+    setBestiaryError('');
+    setBestiaryResults([]);
+    setIsSearchingBestiary(true);
+    try {
+      const baseUrl = normalizeFiveEToolsBaseUrl(state.fiveEToolsBaseUrl);
+      const index = await fetchBestiaryJson(`${baseUrl}data/bestiary/index.json`);
+      const files = Object.values(index).filter((file) => typeof file === 'string');
+      const matches = [];
+      for (const file of files) {
+        const data = await fetchBestiaryJson(`${baseUrl}data/bestiary/${file}`);
+        for (const monster of data.monster || []) {
+          if (monster.name?.toLowerCase().includes(query)) matches.push(monster);
+          if (matches.length >= 40) break;
+        }
+        if (matches.length >= 40) break;
+      }
+      setBestiaryResults(matches);
+      if (!matches.length) setBestiaryError('No matching monsters found.');
+    } catch (error) {
+      setBestiaryError(error.message || 'Unable to search the 5e.tools bestiary.');
+    } finally {
+      setIsSearchingBestiary(false);
+    }
   };
 
   const addDrawing = (drawing) => {
@@ -500,6 +549,35 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               <button className="command accent" title="Save the selected board token into this project's token library" onClick={saveSelectedTokenToLibrary} disabled={!selectedToken}>
                 <Copy size={16} /> Save selected token
               </button>
+              <div className="bestiary-search">
+                <label>
+                  5e.tools base URL
+                  <input value={state.fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => updateFiveEToolsBaseUrl(event.target.value)} />
+                </label>
+                <label>
+                  Search bestiary
+                  <input value={bestiaryQuery} onChange={(event) => setBestiaryQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchBestiary(); }} placeholder="Goblin, dragon, bandit..." />
+                </label>
+                <button className="command" title="Search the 5e.tools bestiary data files" onClick={searchBestiary} disabled={isSearchingBestiary}>
+                  <Library size={16} /> {isSearchingBestiary ? 'Searching...' : 'Search bestiary'}
+                </button>
+                {bestiaryError && <p className="form-error">{bestiaryError}</p>}
+                {bestiaryResults.length > 0 && (
+                  <div className="bestiary-results">
+                    {bestiaryResults.map((monster) => (
+                      <div className="bestiary-result" key={`${monster.source}-${monster.name}`}>
+                        <div>
+                          <strong>{monster.name}</strong>
+                          <span>{monster.source} · CR {formatMonsterCr(monster)} · {formatMonsterSize(monster)}</span>
+                        </div>
+                        <button className="command" title="Save this bestiary monster into the project token library" onClick={() => saveBestiaryMonsterToLibrary(monster)}>
+                          <Plus size={15} /> Save
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {tokenLibrary.map((libraryToken) => (
                 <div className="library-token-card" key={libraryToken.id}>
                   <div className="library-token-header">
@@ -672,4 +750,65 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       </section>
     </>
   );
+}
+
+function normalizeFiveEToolsBaseUrl(baseUrl = 'https://5e.tools/') {
+  const trimmed = baseUrl.trim() || 'https://5e.tools/';
+  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+}
+
+async function fetchBestiaryJson(url) {
+  const response = await fetch(`/api/5etools?url=${encodeURIComponent(url)}`);
+  if (!response.ok) throw new Error(`Unable to load ${url}`);
+  return response.json();
+}
+
+function monsterTokenSize(monster) {
+  const size = Array.isArray(monster.size) ? monster.size[0] : monster.size;
+  return { T: 1, S: 1, M: 1, L: 2, H: 3, G: 4, C: 5 }[size] || 1;
+}
+
+function monsterVisionFeet(monster) {
+  const senses = Array.isArray(monster.senses) ? monster.senses.join(' ') : '';
+  const match = senses.match(/darkvision\s+(\d+)/i);
+  return match ? Number(match[1]) : 0;
+}
+
+function monsterColor(monster) {
+  const type = typeof monster.type === 'string' ? monster.type : monster.type?.type;
+  const colors = {
+    aberration: '#8b5cf6',
+    beast: '#36d399',
+    celestial: '#f2c94c',
+    construct: '#94a3b8',
+    dragon: '#df5d52',
+    elemental: '#38bdf8',
+    fey: '#ec4899',
+    fiend: '#ef4444',
+    giant: '#f97316',
+    humanoid: '#3ea7ff',
+    monstrosity: '#a855f7',
+    ooze: '#84cc16',
+    plant: '#22c55e',
+    undead: '#64748b',
+  };
+  return colors[type] || '#df5d52';
+}
+
+function monsterTokenImage(baseUrl, monster) {
+  if (!monster.name || !monster.source) return '';
+  const source = encodeURIComponent(monster.source);
+  const name = encodeURIComponent(monster.name).replace(/'/g, '%27');
+  return `${normalizeFiveEToolsBaseUrl(baseUrl)}img/bestiary/tokens/${source}/${name}.webp`;
+}
+
+function formatMonsterCr(monster) {
+  if (monster.cr == null) return '?';
+  if (typeof monster.cr === 'object') return monster.cr.cr || '?';
+  return monster.cr;
+}
+
+function formatMonsterSize(monster) {
+  const size = Array.isArray(monster.size) ? monster.size[0] : monster.size;
+  return { T: 'Tiny', S: 'Small', M: 'Medium', L: 'Large', H: 'Huge', G: 'Gargantuan', C: 'Colossal' }[size] || 'Medium';
 }

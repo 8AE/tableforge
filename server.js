@@ -71,6 +71,25 @@ app.post('/api/projects/:id/open', async (request, response) => {
   response.json(data);
 });
 
+app.get('/api/5etools', async (request, response) => {
+  try {
+    const target = new URL(String(request.query.url || ''));
+    if (!['http:', 'https:'].includes(target.protocol)) {
+      response.status(400).json({ error: '5e.tools URL must use http or https.' });
+      return;
+    }
+    const upstream = await fetch(target);
+    if (!upstream.ok) {
+      response.status(upstream.status).json({ error: `Unable to load ${target.href}` });
+      return;
+    }
+    const data = await upstream.json();
+    response.json(data);
+  } catch {
+    response.status(400).json({ error: 'Unable to load 5e.tools JSON. Check the base URL and bestiary data files.' });
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'dist')));
 app.use((_request, response) => {
   response.sendFile(path.join(__dirname, 'dist', 'index.html'));

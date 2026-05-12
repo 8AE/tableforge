@@ -58,6 +58,7 @@ export const defaultState = {
   activeBoardId: firstBoard.id,
   playerBoardId: firstBoard.id,
   tokenLibrary: [],
+  fiveEToolsBaseUrl: 'https://5e.tools/',
 };
 
 export function makeProject(name = 'New Campaign') {
@@ -70,6 +71,7 @@ export function makeProject(name = 'New Campaign') {
       activeBoardId: board.id,
       playerBoardId: board.id,
       tokenLibrary: [],
+      fiveEToolsBaseUrl: 'https://5e.tools/',
     },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -80,6 +82,7 @@ export function migrateState(raw) {
   if (raw?.boards?.length) {
     return {
       ...raw,
+      fiveEToolsBaseUrl: raw.fiveEToolsBaseUrl || 'https://5e.tools/',
       tokenLibrary: (raw.tokenLibrary || []).map((token) => normalizeLibraryToken(token)),
       boards: raw.boards.map((board) => ({
         ...board,
@@ -112,7 +115,7 @@ export function migrateState(raw) {
       tokens: (raw.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', visionEnabled: true, ...token })),
       drawings: (raw.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
     };
-    return { boards: [migrated], activeBoardId: migrated.id, playerBoardId: migrated.id, tokenLibrary: [] };
+    return { boards: [migrated], activeBoardId: migrated.id, playerBoardId: migrated.id, tokenLibrary: [], fiveEToolsBaseUrl: 'https://5e.tools/' };
   }
 
   return defaultState;
