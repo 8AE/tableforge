@@ -199,6 +199,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const importMap = (map) => {
     const dimensions = getMapBoardDimensions(map);
+    const importedWalls = getMapRegionWalls(map, dimensions);
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
       name: map.displayTitle || active.name,
@@ -212,6 +213,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         scale: 1,
         opacity: 1,
         fitToBoard: true,
+      },
+      lighting: {
+        ...defaultLighting,
+        ...active.lighting,
+        walls: importedWalls,
       },
     })));
     setMapImportError('');
@@ -915,6 +921,7 @@ function flattenMapData(data, baseUrl) {
           width: Number(image.width) || 0,
           height: Number(image.height) || 0,
           grid: image.grid || null,
+          mapRegions: image.mapRegions || [],
           searchText: [
             displayTitle,
             rawTitle,
@@ -952,6 +959,61 @@ function getMapBoardDimensions(map) {
     columns: clampBoardTiles(fallbackColumns),
     rows: clampBoardTiles(map.width && map.height ? Math.round(fallbackColumns * (map.height / map.width)) : 20),
   };
+}
+
+function getMapRegionWalls(map, dimensions) {
+  if (!map.width || !map.height || !map.mapRegions?.length) return [];
+  const walls = [];
+  const seen = new Set();
+
+  map.mapRegions.forEach((region, regionIndex) => {
+    const points = (region.points || [])
+      .map((point) => pointToBoard(point, map, dimensions))
+      .filter(Boolean);
+
+    if (points.length < 2) return;
+
+    points.forEach((point, index) => {
+      const next = points[(index + 1) % points.length];
+      if (!next || samePoint(point, next)) return;
+      const key = getWallKey(point, next);
+      if (seen.has(key)) return;
+      seen.add(key);
+      walls.push({
+        id: `wall-map-${region.area || regionIndex}-${index}`,
+        start: point,
+        end: next,
+      });
+    });
+  });
+
+  return walls;
+}
+
+function pointToBoard(point, map, dimensions) {
+  if (!Array.isArray(point) || point.length < 2) return null;
+  return {
+    x: clampWallCoordinate((Number(point[0]) / map.width) * dimensions.columns, dimensions.columns),
+    y: clampWallCoordinate((Number(point[1]) / map.height) * dimensions.rows, dimensions.rows),
+  };
+}
+
+function clampWallCoordinate(value, max) {
+  return Math.max(-0.5, Math.min(max - 0.5, value - 0.5));
+}
+
+function samePoint(a, b) {
+  return Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01;
+}
+
+function getWallKey(a, b) {
+  const first = serializeWallPoint(a);
+  const second = serializeWallPoint(b);
+  return first < second ? `${first}|${second}` : `${second}|${first}`;
+}
+
+function serializeWallPoint(point) {
+  return `${point.x.toFixed(3)},${point.y.toFixed(3)}`;
 }
 
 function clampBoardTiles(value) {
