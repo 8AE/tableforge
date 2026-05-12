@@ -10,6 +10,7 @@ import {
   EyeOff,
   Grid2X2,
   Image,
+  Library,
   Layers,
   MousePointer2,
   Plus,
@@ -23,7 +24,7 @@ import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
 import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
-import { boxesOverlap, defaultLighting, getBoard, loadImage, makeBoard, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
+import { boxesOverlap, defaultLighting, getBoard, loadImage, makeBoard, normalizeLibraryToken, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
 
 export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, undo, redo, canUndo, canRedo }) {
   const [tool, setTool] = useState('select');
@@ -35,7 +36,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [clipboard, setClipboard] = useState(null);
   const [tokensExpanded, setTokensExpanded] = useState(true);
   const [drawingsExpanded, setDrawingsExpanded] = useState(true);
+  const [libraryExpanded, setLibraryExpanded] = useState(true);
   const board = getBoard(state, state.activeBoardId);
+  const tokenLibrary = state.tokenLibrary || [];
 
   const updateBoard = (patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, ...patch })));
@@ -64,6 +67,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       drawings: active.drawings.map((drawing) => drawing.id === id ? { ...drawing, ...patch, fill: patch.color ? `${patch.color}22` : drawing.fill } : drawing),
     })));
   };
+  const updateTokenLibrary = (updater) => {
+    setState((current) => ({
+      ...current,
+      tokenLibrary: typeof updater === 'function' ? updater(current.tokenLibrary || []) : updater,
+    }));
+  };
 
   const addToken = (point) => {
     const token = {
@@ -79,6 +88,35 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     };
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     setSelected({ type: 'token', id: token.id });
+  };
+
+  const saveSelectedTokenToLibrary = () => {
+    if (!selectedToken) return;
+    const libraryToken = normalizeLibraryToken({
+      ...selectedToken,
+      id: uid('library-token'),
+    });
+    updateTokenLibrary((items) => [...items, libraryToken]);
+  };
+
+  const importLibraryToken = (libraryToken) => {
+    const token = {
+      ...normalizeLibraryToken(libraryToken),
+      id: uid('token'),
+      x: 0,
+      y: 0,
+      visible: true,
+    };
+    setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
+    setSelected({ type: 'token', id: token.id });
+  };
+
+  const updateLibraryToken = (id, patch) => {
+    updateTokenLibrary((items) => items.map((token) => token.id === id ? normalizeLibraryToken({ ...token, ...patch }) : token));
+  };
+
+  const deleteLibraryToken = (id) => {
+    updateTokenLibrary((items) => items.filter((token) => token.id !== id));
   };
 
   const addDrawing = (drawing) => {
@@ -452,6 +490,73 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             </div>
           </Panel>
         )}
+
+        <Panel title="Token Library" icon={<Library size={16} />}>
+          <button className="list-toggle" title="Show or hide the project token library" onClick={() => setLibraryExpanded((expanded) => !expanded)}>
+            {libraryExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} {libraryExpanded ? 'Hide library' : `Show library (${tokenLibrary.length})`}
+          </button>
+          {libraryExpanded && (
+            <div className="library-list">
+              <button className="command accent" title="Save the selected board token into this project's token library" onClick={saveSelectedTokenToLibrary} disabled={!selectedToken}>
+                <Copy size={16} /> Save selected token
+              </button>
+              {tokenLibrary.map((libraryToken) => (
+                <div className="library-token-card" key={libraryToken.id}>
+                  <div className="library-token-header">
+                    <span className={`library-token-preview ${libraryToken.image ? 'has-image' : ''}`} style={{ backgroundColor: libraryToken.image ? 'transparent' : libraryToken.color }}>
+                      {libraryToken.image ? <img src={libraryToken.image} alt="" /> : libraryToken.label.slice(0, 2)}
+                    </span>
+                    <input value={libraryToken.label} onChange={(event) => updateLibraryToken(libraryToken.id, { label: event.target.value })} />
+                  </div>
+                  <div className="split">
+                    <label>
+                      Color
+                      <input type="color" value={libraryToken.color} onChange={(event) => updateLibraryToken(libraryToken.id, { color: event.target.value })} />
+                    </label>
+                    <label>
+                      Size
+                      <input type="number" min="1" max="6" value={libraryToken.size} onChange={(event) => updateLibraryToken(libraryToken.id, { size: Number(event.target.value) })} />
+                    </label>
+                  </div>
+                  <label className="file-button">
+                    <Image size={16} />
+                    Token image
+                    <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateLibraryToken(libraryToken.id, { image }))} />
+                  </label>
+                  <div className="split">
+                    <label>
+                      Layer
+                      <select value={libraryToken.layer} onChange={(event) => updateLibraryToken(libraryToken.id, { layer: event.target.value })}>
+                        <option value="player">Player</option>
+                        <option value="dm">DM</option>
+                      </select>
+                    </label>
+                    <label>
+                      Vision feet
+                      <input type="number" min="0" step="5" value={libraryToken.visionFeet || 0} onChange={(event) => updateLibraryToken(libraryToken.id, { visionFeet: Number(event.target.value) })} />
+                    </label>
+                  </div>
+                  <label>
+                    Vision type
+                    <select value={libraryToken.visionMode || 'darkvision'} onChange={(event) => updateLibraryToken(libraryToken.id, { visionMode: event.target.value })}>
+                      <option value="darkvision">Darkvision</option>
+                      <option value="lowlight">Low light</option>
+                      <option value="normal">Normal</option>
+                    </select>
+                  </label>
+                  <label className="check-row">
+                    <input type="checkbox" checked={libraryToken.visionEnabled !== false} onChange={(event) => updateLibraryToken(libraryToken.id, { visionEnabled: event.target.checked })} />
+                    Vision enabled
+                  </label>
+                  <div className="shortcut-row">
+                    <button className="command" title="Import this library token onto the active board" onClick={() => importLibraryToken(libraryToken)}><Plus size={16} /> Import</button>
+                    <button className="command danger" title="Remove this token from the project library" onClick={() => deleteLibraryToken(libraryToken.id)}><Trash2 size={16} /> Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
 
         <Panel title="Drawing" icon={<Brush size={16} />}>
           <div className="split">

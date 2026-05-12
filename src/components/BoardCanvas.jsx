@@ -412,18 +412,17 @@ export function BoardCanvas({
           {displayTokens.map((token) => (
             <button
               key={token.id}
-              className={`map-token token-${token.layer} ${!token.visible ? 'token-hidden' : ''} ${selected?.type === 'token' && selected.id === token.id ? 'selected' : ''}`}
+              className={`map-token token-${token.layer} ${token.image ? 'token-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${selected?.type === 'token' && selected.id === token.id ? 'selected' : ''}`}
               style={{
                 left: token.x * tile,
                 top: token.y * tile,
                 width: token.size * tile,
                 height: token.size * tile,
-                background: token.color,
-                backgroundImage: token.image ? `url(${token.image})` : undefined,
+                backgroundColor: token.image ? 'transparent' : token.color,
               }}
               title={`${token.label} (${token.layer})`}
             >
-              <span>{token.label}</span>
+              {token.image ? <img src={token.image} alt="" draggable="false" /> : <span>{token.label}</span>}
             </button>
           ))}
           {contextMenu && (

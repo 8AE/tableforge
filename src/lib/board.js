@@ -57,6 +57,7 @@ export const defaultState = {
   boards: [firstBoard],
   activeBoardId: firstBoard.id,
   playerBoardId: firstBoard.id,
+  tokenLibrary: [],
 };
 
 export function makeProject(name = 'New Campaign') {
@@ -68,6 +69,7 @@ export function makeProject(name = 'New Campaign') {
       boards: [board],
       activeBoardId: board.id,
       playerBoardId: board.id,
+      tokenLibrary: [],
     },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -78,6 +80,7 @@ export function migrateState(raw) {
   if (raw?.boards?.length) {
     return {
       ...raw,
+      tokenLibrary: (raw.tokenLibrary || []).map((token) => normalizeLibraryToken(token)),
       boards: raw.boards.map((board) => ({
         ...board,
         lighting: {
@@ -109,10 +112,25 @@ export function migrateState(raw) {
       tokens: (raw.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', visionEnabled: true, ...token })),
       drawings: (raw.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
     };
-    return { boards: [migrated], activeBoardId: migrated.id, playerBoardId: migrated.id };
+    return { boards: [migrated], activeBoardId: migrated.id, playerBoardId: migrated.id, tokenLibrary: [] };
   }
 
   return defaultState;
+}
+
+export function normalizeLibraryToken(token = {}) {
+  return {
+    id: token.id || uid('library-token'),
+    label: token.label || 'Token',
+    color: token.color || '#df5d52',
+    image: token.image || '',
+    layer: token.layer || 'player',
+    size: Number(token.size) || 1,
+    visible: token.visible ?? true,
+    visionFeet: Number(token.visionFeet) || 0,
+    visionMode: token.visionMode || 'darkvision',
+    visionEnabled: token.visionEnabled ?? true,
+  };
 }
 
 export function readInitialState() {

@@ -18,6 +18,7 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Create multiple saved boards and publish the active board to the player viewer.
 - Place and move tokens on a tile grid where each tile represents 5 feet.
 - Edit selected tokens, including color and uploaded token artwork.
+- Save tokens to a project-wide token library, edit saved library tokens, and import them onto any board in the project.
 - Configure token vision distance and quickly toggle token vision on or off for board lighting.
 - Duplicate or delete tokens and drawings from the right-click menu in the DM view.
 - Enable board lighting, manually reveal lit areas, draw light-blocking walls, and preview player visibility in the DM view.
