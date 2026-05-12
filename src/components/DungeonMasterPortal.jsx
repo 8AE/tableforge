@@ -476,6 +476,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           </label>
           <div className="map-import">
             <label>
+              5e.tools base URL
+              <input value={state.fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => updateFiveEToolsBaseUrl(event.target.value)} />
+            </label>
+            <label>
               Import from 5e.tools
               <input value={mapQuery} onChange={(event) => setMapQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchMaps(); }} placeholder="Cragmaw Hideout, Castle Ravenloft..." />
             </label>
