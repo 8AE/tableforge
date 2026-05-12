@@ -183,6 +183,28 @@ export function shapeMeasurement(drawing) {
   return `${box.w * tileFeet} x ${box.h * tileFeet} ft`;
 }
 
+export function coneTemplate(drawing) {
+  const start = { x: drawing.start.x + 0.5, y: drawing.start.y + 0.5 };
+  const end = { x: drawing.end.x + 0.5, y: drawing.end.y + 0.5 };
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+  const direction = Math.atan2(dy, dx);
+  const spread = Math.PI / 2;
+  const steps = 20;
+  const arc = [];
+
+  for (let index = 0; index <= steps; index += 1) {
+    const angle = direction - spread / 2 + (spread * index) / steps;
+    arc.push({
+      x: start.x + Math.cos(angle) * distance,
+      y: start.y + Math.sin(angle) * distance,
+    });
+  }
+
+  return { start, arc, label: { x: start.x + Math.cos(direction) * distance * 0.62, y: start.y + Math.sin(direction) * distance * 0.62 } };
+}
+
 export function revealBox(reveal) {
   const x = Math.min(reveal.start.x, reveal.end.x);
   const y = Math.min(reveal.start.y, reveal.end.y);

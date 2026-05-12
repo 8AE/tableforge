@@ -132,6 +132,10 @@ input[type="range"] {
   gap: 10px;
 }
 
+.split + .command.accent {
+  margin-top: 12px;
+}
+
 .file-button,
 .command,
 .ghost-link,
@@ -289,6 +293,10 @@ input[type="range"] {
   border: 1px solid rgba(245, 243, 237, 0.14);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.05);
+}
+
+.list-toggle + .asset-list {
+  margin-top: 12px;
 }
 
 .asset-row {

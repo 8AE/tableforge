@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  coneTemplate,
   feetBetween,
   isPointInDrawing,
   isPointNearWall,
@@ -481,11 +482,15 @@ function renderStoredShape(drawing, tile, isSelected = false) {
     );
   }
   if (drawing.shape === 'cone') {
-    const points = `${(drawing.start.x + 0.5) * tile},${(drawing.start.y + 0.5) * tile} ${(drawing.end.x + 1) * tile},${(drawing.end.y + 1) * tile} ${drawing.end.x * tile},${drawing.end.y * tile}`;
+    const cone = coneTemplate(drawing);
+    const points = [
+      `${cone.start.x * tile},${cone.start.y * tile}`,
+      ...cone.arc.map((point) => `${point.x * tile},${point.y * tile}`),
+    ].join(' ');
     return (
       <g key={drawing.id}>
         <polygon {...common} points={points} />
-        <MeasureLabel x={x + w / 2} y={y + h / 2} text={label} />
+        <MeasureLabel x={cone.label.x * tile} y={cone.label.y * tile} text={label} />
       </g>
     );
   }

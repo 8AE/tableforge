@@ -109,14 +109,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     window.setTimeout(() => publishProjectToPlayers(openProjectId), 320);
   };
 
-  const clearDrawings = () => {
-    setState((current) => updateActiveBoard(current, (active) => ({
-      ...active,
-      drawings: active.drawings.filter((drawing) => drawing.layer !== drawLayer),
-    })));
-    setSelected(null);
-  };
-
   const addLightReveal = (reveal) => {
     const revealArea = revealBox(reveal);
     setState((current) => updateActiveBoard(current, (active) => ({
@@ -475,7 +467,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               </select>
             </label>
           </div>
-          <button className="command" onClick={clearDrawings}><Eraser size={16} /> Clear active drawing layer</button>
           {selectedDrawing && (
             <div className="selection-editor">
               <strong>Selected drawing</strong>
