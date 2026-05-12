@@ -5,6 +5,7 @@ export const defaultLighting = {
   enabled: false,
   darkness: 0.86,
   reveals: [],
+  hiddenReveals: [],
   walls: [],
 };
 
@@ -78,7 +79,12 @@ export function migrateState(raw) {
       ...raw,
       boards: raw.boards.map((board) => ({
         ...board,
-        lighting: { ...defaultLighting, ...board.lighting, walls: board.lighting?.walls || [] },
+        lighting: {
+          ...defaultLighting,
+          ...board.lighting,
+          hiddenReveals: board.lighting?.hiddenReveals || [],
+          walls: board.lighting?.walls || [],
+        },
         tokens: (board.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', visionEnabled: true, ...token })),
         drawings: (board.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
       })),
@@ -183,6 +189,10 @@ export function revealBox(reveal) {
   return { x, y, w, h };
 }
 
+export function boxesOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
 export function wallEndpoints(wall, tile) {
   return {
     x1: (wall.start.x + 0.5) * tile,
@@ -190,6 +200,19 @@ export function wallEndpoints(wall, tile) {
     x2: (wall.end.x + 0.5) * tile,
     y2: (wall.end.y + 0.5) * tile,
   };
+}
+
+export function isPointNearWall(point, wall) {
+  const start = { x: wall.start.x + 0.5, y: wall.start.y + 0.5 };
+  const end = { x: wall.end.x + 0.5, y: wall.end.y + 0.5 };
+  const lengthSquared = ((end.x - start.x) ** 2) + ((end.y - start.y) ** 2);
+  if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y) <= 0.25;
+  const ratio = Math.max(0, Math.min(1, (((point.x - start.x) * (end.x - start.x)) + ((point.y - start.y) * (end.y - start.y))) / lengthSquared));
+  const closest = {
+    x: start.x + (end.x - start.x) * ratio,
+    y: start.y + (end.y - start.y) * ratio,
+  };
+  return Math.hypot(point.x - closest.x, point.y - closest.y) <= 0.28;
 }
 
 export function visionPolygonPoints(token, walls, tile) {

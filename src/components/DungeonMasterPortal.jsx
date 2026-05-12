@@ -21,7 +21,7 @@ import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
 import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
-import { defaultLighting, getBoard, loadImage, makeBoard, offsetDrawing, uid, updateActiveBoard } from '../lib/board';
+import { boxesOverlap, defaultLighting, getBoard, loadImage, makeBoard, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
 
 export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, undo, redo, canUndo, canRedo }) {
   const [tool, setTool] = useState('select');
@@ -111,11 +111,13 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   };
 
   const addLightReveal = (reveal) => {
+    const revealArea = revealBox(reveal);
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
       lighting: {
         ...{ ...defaultLighting, ...active.lighting },
         reveals: [...(active.lighting?.reveals || []), reveal],
+        hiddenReveals: (active.lighting?.hiddenReveals || []).filter((hidden) => !boxesOverlap(revealBox(hidden), revealArea)),
       },
     })));
   };
@@ -130,8 +132,18 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     })));
   };
 
+  const removeLightReveal = (area) => {
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      lighting: {
+        ...{ ...defaultLighting, ...active.lighting },
+        hiddenReveals: [...(active.lighting?.hiddenReveals || []), { id: uid('hidden-reveal'), ...area }],
+      },
+    })));
+  };
+
   const clearLightReveals = () => {
-    updateLighting({ reveals: [] });
+    updateLighting({ reveals: [], hiddenReveals: [] });
   };
 
   const clearLightWalls = () => {
@@ -165,6 +177,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       ...active,
       tokens: target.type === 'token' ? active.tokens.filter((token) => token.id !== target.id) : active.tokens,
       drawings: target.type === 'drawing' ? active.drawings.filter((drawing) => drawing.id !== target.id) : active.drawings,
+      lighting: target.type === 'wall'
+        ? { ...defaultLighting, ...active.lighting, walls: (active.lighting?.walls || []).filter((wall) => wall.id !== target.id) }
+        : active.lighting,
     })));
     setSelected(null);
   };
@@ -184,6 +199,21 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       const drawing = { ...structuredClone(source), ...offsetDrawing(source, 1, 1), id: uid('drawing') };
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
       setSelected({ type: 'drawing', id: drawing.id });
+    }
+    if (target.type === 'wall') {
+      const source = board.lighting?.walls?.find((wall) => wall.id === target.id);
+      if (!source) return;
+      const wall = {
+        ...structuredClone(source),
+        id: uid('wall'),
+        start: { x: source.start.x + 1, y: source.start.y + 1 },
+        end: { x: source.end.x + 1, y: source.end.y + 1 },
+      };
+      setState((current) => updateActiveBoard(current, (active) => ({
+        ...active,
+        lighting: { ...defaultLighting, ...active.lighting, walls: [...(active.lighting?.walls || []), wall] },
+      })));
+      setSelected({ type: 'wall', id: wall.id });
     }
   };
 
@@ -224,6 +254,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const selectedDrawing = selected?.type === 'drawing' ? board.drawings.find((drawing) => drawing.id === selected.id) : null;
   const selectedToken = selected?.type === 'token' ? board.tokens.find((token) => token.id === selected.id) : null;
+  const selectedWall = selected?.type === 'wall' ? board.lighting?.walls?.find((wall) => wall.id === selected.id) : null;
 
   return (
     <>
@@ -329,6 +360,15 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <button className={activeLayer === 'dm' ? 'active' : ''} onClick={() => setActiveLayer('dm')}><EyeOff size={15} /> DM</button>
           </div>
         </Panel>
+
+        {selectedWall && (
+          <Panel title="Selected Wall" icon={<EyeOff size={16} />}>
+            <div className="shortcut-row">
+              <button className="command" title="Duplicate the selected light-blocking wall" onClick={() => duplicateSelection()}><Copy size={16} /> Duplicate</button>
+              <button className="command danger" title="Delete the selected light-blocking wall" onClick={() => deleteSelection()}><Trash2 size={16} /> Delete</button>
+            </div>
+          </Panel>
+        )}
 
         <Panel title="Shortcuts" icon={<Clipboard size={16} />}>
           <div className="shortcut-row">
@@ -479,6 +519,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onMoveBackground={(patch) => updateBackground(patch)}
           onAddLightReveal={addLightReveal}
           onAddLightWall={addLightWall}
+          onRemoveLightReveal={removeLightReveal}
           onDeleteSelection={deleteSelection}
           onDuplicateSelection={duplicateSelection}
         />

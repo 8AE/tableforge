@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   feetBetween,
   isPointInDrawing,
+  isPointNearWall,
   normalizeBackground,
+  offsetDrawing,
   revealBox,
   shapeBox,
   shapeMeasurement,
@@ -27,6 +29,7 @@ export function BoardCanvas({
   onMoveBackground,
   onAddLightReveal,
   onAddLightWall,
+  onRemoveLightReveal,
   onDeleteSelection,
   onDuplicateSelection,
   fitToViewport = false,
@@ -41,10 +44,21 @@ export function BoardCanvas({
   const width = board.columns * tile;
   const height = board.rows * tile;
   const scale = fitScale * playerZoom;
-  const visibleTokens = board.tokens.filter((token) => view === 'dm' || (token.layer === 'player' && token.visible));
-  const visibleDrawings = board.drawings.filter((drawing) => view === 'dm' || (drawing.layer === 'player' && drawing.visible !== false));
   const background = normalizeBackground(board.background);
-  const lighting = { enabled: false, darkness: 0.86, reveals: [], walls: [], ...board.lighting };
+  const lighting = { enabled: false, darkness: 0.86, reveals: [], hiddenReveals: [], walls: [], ...board.lighting };
+  const visibleTokens = useMemo(
+    () => board.tokens.filter((token) => view === 'dm' || (token.layer === 'player' && token.visible)),
+    [board.tokens, view],
+  );
+  const visibleDrawings = useMemo(
+    () => board.drawings.filter((drawing) => view === 'dm' || (drawing.layer === 'player' && drawing.visible !== false)),
+    [board.drawings, view],
+  );
+  const visionPolygons = useMemo(() => (
+    visibleTokens
+      .filter((token) => token.layer === 'player' && token.visible && token.visionEnabled !== false && Number(token.visionFeet) > 0)
+      .map((token) => ({ id: token.id, points: visionPolygonPoints(token, lighting.walls, tile) }))
+  ), [visibleTokens, lighting.walls, tile]);
 
   useEffect(() => {
     if (!fitToViewport || !shellRef.current) {
@@ -82,6 +96,7 @@ export function BoardCanvas({
   ));
 
   const drawingAt = (point) => [...visibleDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing));
+  const wallAt = (point) => [...lighting.walls].reverse().find((wall) => isPointNearWall(point, wall));
 
   const onPointerDown = (event) => {
     if (view !== 'dm') return;
@@ -90,6 +105,7 @@ export function BoardCanvas({
     const snapped = snapToTile(point, board);
     const token = tokenAt(point);
     const drawing = drawingAt(point);
+    const wall = wallAt(point);
 
     if (tool === 'background') {
       const bgWidth = width * background.scale;
@@ -107,13 +123,24 @@ export function BoardCanvas({
 
     if (tool === 'select' && token) {
       setSelected({ type: 'token', id: token.id });
-      setDrag({ type: 'token', id: token.id, offset: { x: point.x - token.x, y: point.y - token.y } });
+      setDrag({
+        type: 'token',
+        id: token.id,
+        offset: { x: point.x - token.x, y: point.y - token.y },
+        original: { x: token.x, y: token.y },
+        preview: { x: token.x, y: token.y },
+      });
       return;
     }
 
     if (tool === 'select' && drawing) {
       setSelected({ type: 'drawing', id: drawing.id });
-      setDrag({ type: 'drawing', id: drawing.id, last: snapped });
+      setDrag({ type: 'drawing', id: drawing.id, start: snapped, dx: 0, dy: 0 });
+      return;
+    }
+
+    if (tool === 'select' && wall) {
+      setSelected({ type: 'wall', id: wall.id });
       return;
     }
 
@@ -123,7 +150,8 @@ export function BoardCanvas({
     }
 
     if (['ruler', 'square', 'circle', 'cone', 'shape', 'light', 'wall'].includes(tool)) {
-      setDrag({ type: tool, start: snapped, end: snapped });
+      const type = tool === 'light' && event.button === 2 ? 'light-hide' : tool;
+      setDrag({ type, start: snapped, end: snapped });
       return;
     }
 
@@ -157,20 +185,18 @@ export function BoardCanvas({
     }
 
     if (drag.type === 'token') {
-      onMoveToken(drag.id, {
-        x: Math.max(0, Math.min(board.columns - 1, Math.floor(point.x - drag.offset.x))),
-        y: Math.max(0, Math.min(board.rows - 1, Math.floor(point.y - drag.offset.y))),
+      setDrag({
+        ...drag,
+        preview: {
+          x: Math.max(0, Math.min(board.columns - 1, Math.floor(point.x - drag.offset.x))),
+          y: Math.max(0, Math.min(board.rows - 1, Math.floor(point.y - drag.offset.y))),
+        },
       });
       return;
     }
 
     if (drag.type === 'drawing') {
-      const dx = snapped.x - drag.last.x;
-      const dy = snapped.y - drag.last.y;
-      if (dx || dy) {
-        onMoveDrawing(drag.id, dx, dy);
-        setDrag({ ...drag, last: snapped });
-      }
+      setDrag({ ...drag, dx: snapped.x - drag.start.x, dy: snapped.y - drag.start.y });
       return;
     }
 
@@ -195,17 +221,25 @@ export function BoardCanvas({
   const onContextMenu = (event) => {
     if (view !== 'dm') return;
     event.preventDefault();
+    if (tool === 'light') return;
     const point = pointFromEvent(event);
     const token = tokenAt(point);
     const drawing = drawingAt(point);
-    if (!token && !drawing) return;
-    const target = token ? { type: 'token', id: token.id } : { type: 'drawing', id: drawing.id };
+    const wall = wallAt(point);
+    if (!token && !drawing && !wall) return;
+    const target = token ? { type: 'token', id: token.id } : drawing ? { type: 'drawing', id: drawing.id } : { type: 'wall', id: wall.id };
     setSelected(target);
     setContextMenu({ x: point.px, y: point.py, target });
   };
 
   const onPointerUp = () => {
     if (!drag) return;
+    if (drag.type === 'token') {
+      onMoveToken(drag.id, drag.preview);
+    }
+    if (drag.type === 'drawing' && (drag.dx || drag.dy)) {
+      onMoveDrawing(drag.id, drag.dx, drag.dy);
+    }
     if (drag.type === 'draw' && drag.points.length > 1) {
       onAddDrawing({
         id: uid('draw'),
@@ -220,6 +254,12 @@ export function BoardCanvas({
     if (drag.type === 'light') {
       onAddLightReveal({
         id: uid('reveal'),
+        start: drag.start,
+        end: drag.end,
+      });
+    }
+    if (drag.type === 'light-hide') {
+      onRemoveLightReveal({
         start: drag.start,
         end: drag.end,
       });
@@ -251,7 +291,13 @@ export function BoardCanvas({
   const liveDrawing = drag?.type === 'draw'
     ? [{ id: 'live-draw', type: 'path', points: drag.points, color: drawColor, strokeWidth: 4, layer: drawLayer }]
     : [];
-  const liveShape = drag && ['square', 'circle', 'cone', 'shape', 'ruler', 'light', 'wall'].includes(drag.type) ? drag : null;
+  const liveShape = drag && ['square', 'circle', 'cone', 'shape', 'ruler', 'light', 'light-hide', 'wall'].includes(drag.type) ? drag : null;
+  const displayTokens = visibleTokens.map((token) => (
+    drag?.type === 'token' && drag.id === token.id ? { ...token, ...drag.preview } : token
+  ));
+  const displayDrawings = visibleDrawings.map((drawing) => (
+    drag?.type === 'drawing' && drag.id === drawing.id ? { ...drawing, ...offsetDrawing(drawing, drag.dx, drag.dy) } : drawing
+  ));
 
   return (
     <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
@@ -296,17 +342,18 @@ export function BoardCanvas({
               <mask id={`lighting-mask-${board.id}`}>
                 <rect x="0" y="0" width={width} height={height} fill="white" />
                 {lighting.reveals.map((reveal) => renderRevealHole(reveal, tile))}
-                {visibleTokens.filter((token) => token.layer === 'player' && token.visible && token.visionEnabled !== false && Number(token.visionFeet) > 0).map((token) => (
+                {lighting.hiddenReveals.map((reveal) => renderRevealHole(reveal, tile, 'white'))}
+                {visionPolygons.map((token) => (
                   <polygon
                     key={`vision-${token.id}`}
-                    points={visionPolygonPoints(token, lighting.walls, tile)}
+                    points={token.points}
                     fill="black"
                   />
                 ))}
               </mask>
             </defs>
-            {[...visibleDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected))}
-            {view === 'dm' && lighting.walls.map((wall) => renderLightingWall(wall, tile))}
+            {[...displayDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected))}
+            {view === 'dm' && lighting.walls.map((wall) => renderLightingWall(wall, tile, selected))}
             {liveShape && renderLiveShape(liveShape, tile)}
             {lighting.enabled && (
               <rect
@@ -321,7 +368,7 @@ export function BoardCanvas({
             )}
           </svg>
 
-          {visibleTokens.map((token) => (
+          {displayTokens.map((token) => (
             <button
               key={token.id}
               className={`map-token token-${token.layer} ${!token.visible ? 'token-hidden' : ''} ${selected?.type === 'token' && selected.id === token.id ? 'selected' : ''}`}
@@ -414,11 +461,11 @@ function renderLiveShape(shape, tile) {
   const start = shape.start;
   const end = shape.end;
   if (shape.type === 'wall') {
-    return renderLightingWall({ id: 'live-wall', start, end }, tile, true);
+    return renderLightingWall({ id: 'live-wall', start, end }, tile, null, true);
   }
-  if (shape.type === 'light') {
+  if (shape.type === 'light' || shape.type === 'light-hide') {
     const box = revealBox(shape);
-    return <rect key="live-light" className="live-light-reveal" x={box.x * tile} y={box.y * tile} width={box.w * tile} height={box.h * tile} rx="4" />;
+    return <rect key="live-light" className={shape.type === 'light-hide' ? 'live-light-hide' : 'live-light-reveal'} x={box.x * tile} y={box.y * tile} width={box.w * tile} height={box.h * tile} rx="4" />;
   }
   if (shape.type === 'ruler') {
     const x1 = (start.x + 0.5) * tile;
@@ -444,10 +491,11 @@ function renderLiveShape(shape, tile) {
   }, tile);
 }
 
-function renderLightingWall(wall, tile, isLive = false) {
+function renderLightingWall(wall, tile, selected = null, isLive = false) {
   const points = wallEndpoints(wall, tile);
+  const isSelected = selected?.type === 'wall' && selected.id === wall.id;
   return (
-    <g key={`wall-${wall.id}`} className={isLive ? 'live-light-wall' : 'lighting-wall'}>
+    <g key={`wall-${wall.id}`} className={`${isLive ? 'live-light-wall' : 'lighting-wall'} ${isSelected ? 'selected-lighting-wall' : ''}`}>
       <line x1={points.x1} y1={points.y1} x2={points.x2} y2={points.y2} />
       <circle cx={points.x1} cy={points.y1} r="5" />
       <circle cx={points.x2} cy={points.y2} r="5" />
@@ -455,7 +503,7 @@ function renderLightingWall(wall, tile, isLive = false) {
   );
 }
 
-function renderRevealHole(reveal, tile) {
+function renderRevealHole(reveal, tile, fill = 'black') {
   const box = revealBox(reveal);
   return (
     <rect
@@ -465,7 +513,7 @@ function renderRevealHole(reveal, tile) {
       width={box.w * tile}
       height={box.h * tile}
       rx="8"
-      fill="black"
+      fill={fill}
     />
   );
 }
