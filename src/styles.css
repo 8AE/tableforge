@@ -389,6 +389,16 @@ input[type="range"] {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.map-import {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid rgba(245, 243, 237, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .bestiary-results {
   display: grid;
   gap: 8px;
@@ -396,7 +406,8 @@ input[type="range"] {
   overflow: auto;
 }
 
-.bestiary-result {
+.bestiary-result,
+.map-result {
   display: grid;
   grid-template-columns: 1fr 80px;
   gap: 8px;
@@ -404,18 +415,29 @@ input[type="range"] {
 }
 
 .bestiary-result strong,
-.bestiary-result span {
+.bestiary-result span,
+.map-result strong,
+.map-result span {
   display: block;
 }
 
-.bestiary-result strong {
+.bestiary-result strong,
+.map-result strong {
   color: #f5f3ed;
   font-size: 13px;
 }
 
-.bestiary-result span {
+.bestiary-result span,
+.map-result span {
   color: #b7b0a2;
   font-size: 12px;
+}
+
+.map-results {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
 }
 
 .library-token-card {

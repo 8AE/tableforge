@@ -44,6 +44,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [bestiaryResults, setBestiaryResults] = useState([]);
   const [bestiaryError, setBestiaryError] = useState('');
   const [isSearchingBestiary, setIsSearchingBestiary] = useState(false);
+  const [mapQuery, setMapQuery] = useState('');
+  const [mapResults, setMapResults] = useState([]);
+  const [mapImportError, setMapImportError] = useState('');
+  const [isSearchingMaps, setIsSearchingMaps] = useState(false);
   const board = getBoard(state, state.activeBoardId);
   const tokenLibrary = state.tokenLibrary || [];
 
@@ -170,6 +174,49 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     } finally {
       setIsSearchingBestiary(false);
     }
+  };
+
+  const searchMaps = async () => {
+    const query = mapQuery.trim().toLowerCase();
+    if (!query) return;
+    setMapImportError('');
+    setMapResults([]);
+    setIsSearchingMaps(true);
+    try {
+      const baseUrl = normalizeFiveEToolsBaseUrl(state.fiveEToolsBaseUrl);
+      const data = await fetchMapsJson(baseUrl);
+      const matches = flattenMapData(data, baseUrl)
+        .filter((map) => map.searchText.includes(query))
+        .slice(0, 30);
+      setMapResults(matches);
+      if (!matches.length) setMapImportError('No matching maps found.');
+    } catch (error) {
+      setMapImportError(error.message || 'Unable to search 5e.tools maps.');
+    } finally {
+      setIsSearchingMaps(false);
+    }
+  };
+
+  const importMap = (map) => {
+    const dimensions = getMapBoardDimensions(map);
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      name: map.displayTitle || active.name,
+      columns: dimensions.columns,
+      rows: dimensions.rows,
+      background: {
+        ...active.background,
+        src: map.imageUrl,
+        x: 0,
+        y: 0,
+        scale: 1,
+        opacity: 1,
+        fitToBoard: true,
+      },
+    })));
+    setMapImportError('');
+    setMapResults([]);
+    setMapQuery(map.displayTitle);
   };
 
   const addDrawing = (drawing) => {
@@ -408,11 +455,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           <div className="split">
             <label>
               Tiles wide
-              <input type="number" min="4" max="80" value={board.columns} onChange={(event) => updateBoard({ columns: Number(event.target.value) })} />
+              <input type="number" min="4" max="200" value={board.columns} onChange={(event) => updateBoard({ columns: Number(event.target.value) })} />
             </label>
             <label>
               Tiles high
-              <input type="number" min="4" max="80" value={board.rows} onChange={(event) => updateBoard({ rows: Number(event.target.value) })} />
+              <input type="number" min="4" max="200" value={board.rows} onChange={(event) => updateBoard({ rows: Number(event.target.value) })} />
             </label>
           </div>
           <label>
@@ -427,6 +474,34 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             Background image
             <input type="file" accept="image/*" onChange={(event) => loadImage(event, (src) => updateBackground({ src }))} />
           </label>
+          <div className="map-import">
+            <label>
+              Import from 5e.tools
+              <input value={mapQuery} onChange={(event) => setMapQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchMaps(); }} placeholder="Cragmaw Hideout, Castle Ravenloft..." />
+            </label>
+            <button className="command" title="Search the 5e.tools maps gallery" onClick={searchMaps} disabled={isSearchingMaps}>
+              <Library size={16} /> {isSearchingMaps ? 'Searching...' : 'Search maps'}
+            </button>
+            {mapImportError && <p className="form-error">{mapImportError}</p>}
+            {mapResults.length > 0 && (
+              <div className="map-results">
+                {mapResults.map((map) => {
+                  const dimensions = getMapBoardDimensions(map);
+                  return (
+                    <div className="map-result" key={map.id}>
+                      <div>
+                        <strong>{map.displayTitle}</strong>
+                        <span>{map.sourceName} · {map.chapterName} · {dimensions.columns} x {dimensions.rows}</span>
+                      </div>
+                      <button className="command" title="Use this map as the active board background" onClick={() => importMap(map)}>
+                        <Image size={15} /> Import
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <label className="check-row" title="Keep the background image stretched to the board's full width and height">
             <input type="checkbox" checked={Boolean(board.background.fitToBoard)} onChange={(event) => toggleBackgroundFit(event.target.checked)} />
             Fit background to board
@@ -802,6 +877,81 @@ async function fetchBestiaryJson(url) {
   const response = await fetch(`/api/5etools?url=${encodeURIComponent(url)}`);
   if (!response.ok) throw new Error(`Unable to load ${url}`);
   return response.json();
+}
+
+async function fetchMapsJson(baseUrl) {
+  try {
+    return await fetchBestiaryJson(`${baseUrl}data/generated/gendata-maps.json`);
+  } catch {
+    return fetchBestiaryJson('https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/data/generated/gendata-maps.json');
+  }
+}
+
+function flattenMapData(data, baseUrl) {
+  const maps = [];
+  Object.values(data || {}).forEach((source) => {
+    source.chapters?.forEach((chapter) => {
+      const titlesById = new Map();
+      let lastMapTitle = '';
+      chapter.images?.forEach((image, index) => {
+        if (!['map', 'mapPlayer'].includes(image.imageType)) return;
+        const rawTitle = image.title || image.altText || 'Untitled Map';
+        const displayTitle = image.imageType === 'mapPlayer' && rawTitle === 'Player Version'
+          ? `${lastMapTitle || rawTitle} (Player)`
+          : rawTitle;
+        if (image.id) titlesById.set(image.id, displayTitle);
+        if (image.imageType === 'map') lastMapTitle = displayTitle;
+        maps.push({
+          id: `${source.id}-${chapter.ix}-${index}-${image.href?.path || rawTitle}`,
+          displayTitle,
+          sourceName: source.name || source.source || source.id,
+          chapterName: chapter.name || '',
+          imageType: image.imageType,
+          imageUrl: getImageUrl(baseUrl, image.href),
+          width: Number(image.width) || 0,
+          height: Number(image.height) || 0,
+          grid: image.grid || null,
+          searchText: [
+            displayTitle,
+            rawTitle,
+            source.name,
+            source.source,
+            source.id,
+            chapter.name,
+            image.mapParent?.id ? titlesById.get(image.mapParent.id) : '',
+          ].filter(Boolean).join(' ').toLowerCase(),
+        });
+      });
+    });
+  });
+  return maps.sort((a, b) => Number(b.imageType === 'mapPlayer') - Number(a.imageType === 'mapPlayer'));
+}
+
+function getImageUrl(baseUrl, href = {}) {
+  if (href.type === 'external') return href.url;
+  if (!href.path) return '';
+  return `${normalizeFiveEToolsBaseUrl(baseUrl)}img/${href.path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+function getMapBoardDimensions(map) {
+  const grid = map.grid || {};
+  const scale = Number(grid.scale) || 1;
+  const gridSize = grid.type === 'square' ? Number(grid.size) || 0 : 0;
+  if (gridSize && map.width && map.height) {
+    return {
+      columns: clampBoardTiles(Math.ceil((map.width / gridSize) * scale)),
+      rows: clampBoardTiles(Math.ceil((map.height / gridSize) * scale)),
+    };
+  }
+  const fallbackColumns = map.width && map.height ? Math.round(Math.sqrt((map.width / map.height) * 600)) : 30;
+  return {
+    columns: clampBoardTiles(fallbackColumns),
+    rows: clampBoardTiles(map.width && map.height ? Math.round(fallbackColumns * (map.height / map.width)) : 20),
+  };
+}
+
+function clampBoardTiles(value) {
+  return Math.max(4, Math.min(200, Number(value) || 24));
 }
 
 function monsterTokenSize(monster) {
