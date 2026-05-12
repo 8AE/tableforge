@@ -902,9 +902,14 @@ function flattenMapData(data, baseUrl) {
   Object.values(data || {}).forEach((source) => {
     source.chapters?.forEach((chapter) => {
       const titlesById = new Map();
+      const imagesById = new Map();
       let lastMapTitle = '';
+      chapter.images?.forEach((image) => {
+        if (image.id) imagesById.set(image.id, image);
+      });
       chapter.images?.forEach((image, index) => {
         if (!['map', 'mapPlayer'].includes(image.imageType)) return;
+        const parentImage = image.mapParent?.id ? imagesById.get(image.mapParent.id) : null;
         const rawTitle = image.title || image.altText || 'Untitled Map';
         const displayTitle = image.imageType === 'mapPlayer' && rawTitle === 'Player Version'
           ? `${lastMapTitle || rawTitle} (Player)`
@@ -921,7 +926,7 @@ function flattenMapData(data, baseUrl) {
           width: Number(image.width) || 0,
           height: Number(image.height) || 0,
           grid: image.grid || null,
-          mapRegions: image.mapRegions || [],
+          mapRegions: image.mapRegions || parentImage?.mapRegions || [],
           searchText: [
             displayTitle,
             rawTitle,
