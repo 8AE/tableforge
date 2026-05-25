@@ -12,7 +12,7 @@ import {
 } from '../lib/dungeon';
 
 const toolMeta = {
-  wall: { label: 'Walls', icon: <Layers size={16} /> },
+  floor: { label: 'Carve Floor', icon: <Layers size={16} /> },
   door: { label: 'Doors', icon: <DoorOpen size={16} /> },
   stairs: { label: 'Stairs', icon: <Mountain size={16} /> },
   difficult: { label: 'Diff. Terrain', icon: <Grid2X2 size={16} /> },
@@ -23,7 +23,7 @@ const toolMeta = {
 export function DungeonBuilder({ onBack, onImportToCampaign }) {
   const [dungeons, setDungeons] = useState([]);
   const [activeDungeon, setActiveDungeon] = useState(null);
-  const [tool, setTool] = useState('wall');
+  const [tool, setTool] = useState('floor');
   const [createDraft, setCreateDraft] = useState({ name: 'New Dungeon', width: 20, height: 20 });
   const [isCreating, setIsCreating] = useState(false);
   const [message, setMessage] = useState('');
@@ -249,7 +249,7 @@ function DungeonEditor({ dungeon, tool, setTool, onBack, onChange, onSave, onImp
           <strong>Lighting Options</strong>
           <label className="check-row">
             <input type="checkbox" checked readOnly />
-            Auto Wall Light
+            Auto Boundary Light
           </label>
           <span>{normalized.lightingGeometry.length} lighting vectors generated.</span>
         </div>

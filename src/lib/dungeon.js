@@ -1,7 +1,7 @@
 import { uid } from './board';
 
 export const dungeonTileSize = 50;
-export const dungeonTools = ['wall', 'door', 'stairs', 'difficult', 'water', 'erase'];
+export const dungeonTools = ['floor', 'door', 'stairs', 'difficult', 'water', 'erase'];
 
 export function makeDungeon(name = 'New Dungeon', width = 20, height = 20) {
   const id = uid('dungeon');
@@ -28,7 +28,7 @@ export function normalizeDungeon(raw = {}) {
       width: clampGridSize(raw.gridSize?.width || 20),
       height: clampGridSize(raw.gridSize?.height || 20),
     },
-    tiles: Array.isArray(raw.tiles) ? raw.tiles : [],
+    tiles: normalizeDungeonTiles(raw.tiles),
     terrain: Array.isArray(raw.terrain) ? raw.terrain : [],
     lightingGeometry: Array.isArray(raw.lightingGeometry) ? raw.lightingGeometry : [],
   };
@@ -54,6 +54,32 @@ export function inBounds(dungeon, x, y) {
   return x >= 0 && y >= 0 && x < dungeon.gridSize.width && y < dungeon.gridSize.height;
 }
 
+function normalizeDungeonTiles(tiles = []) {
+  if (!Array.isArray(tiles)) return [];
+  const normalized = [];
+  const floors = new Set();
+
+  for (const tile of tiles) {
+    if (!tile || typeof tile !== 'object') continue;
+    if ((tile.type === 'floor' || (tile.type === 'wall' && !tile.edge)) && Number.isFinite(Number(tile.x)) && Number.isFinite(Number(tile.y))) {
+      const floor = { x: Number(tile.x), y: Number(tile.y), type: 'floor' };
+      const key = tileKey(floor.x, floor.y);
+      if (!floors.has(key)) {
+        floors.add(key);
+        normalized.push(floor);
+      }
+      continue;
+    }
+    if (tile.type === 'door' && tile.edge) {
+      normalized.push({ ...tile, state: tile.state || 'closed' });
+      continue;
+    }
+    if (tile.type === 'stairs') normalized.push(tile);
+  }
+
+  return normalized;
+}
+
 export function paintDungeonAt(dungeon, tool, point) {
   const next = structuredClone(dungeon);
   const cell = {
@@ -62,10 +88,10 @@ export function paintDungeonAt(dungeon, tool, point) {
   };
 
   if (tool === 'erase') return removeAt(next, point, cell);
-  if (tool === 'wall') return setWall(next, point, cell);
+  if (tool === 'floor' || tool === 'wall') return carveFloor(next, cell);
   if (tool === 'door') return setDoor(next, point, cell);
-  if (tool === 'stairs') return setCellTile(next, { x: cell.x, y: cell.y, type: 'stairs', direction: point.localY < 0.5 ? 'up' : 'down' });
-  if (tool === 'water' || tool === 'difficult') return setTerrain(next, { x: cell.x, y: cell.y, type: tool });
+  if (tool === 'stairs') return setCellTile(carveFloor(next, cell), { x: cell.x, y: cell.y, type: 'stairs', direction: point.localY < 0.5 ? 'up' : 'down' });
+  if (tool === 'water' || tool === 'difficult') return setTerrain(carveFloor(next, cell), { x: cell.x, y: cell.y, type: tool });
   return next;
 }
 
@@ -129,16 +155,16 @@ export function dungeonToBoard(dungeon) {
 }
 
 export function generateLightingGeometry(dungeon) {
-  const walls = new Set();
-  const wallCells = new Set();
+  const floorCells = new Set();
   const doors = [];
+  const doorEdges = new Set();
 
   for (const tile of dungeon.tiles || []) {
-    if (tile.type === 'wall') {
-      if (tile.edge) walls.add(edgeKey(tile.edge));
-      else wallCells.add(tileKey(tile.x, tile.y));
+    if (tile.type === 'floor') floorCells.add(tileKey(tile.x, tile.y));
+    if (tile.type === 'door') {
+      doors.push(tile);
+      doorEdges.add(edgeKey(tile.edge));
     }
-    if (tile.type === 'door') doors.push(tile);
   }
 
   const segments = [];
@@ -147,17 +173,12 @@ export function generateLightingGeometry(dungeon) {
     segments.push({ type, ...(id ? { id } : {}), points, blocksLight });
   };
 
-  wallCells.forEach((key) => {
+  floorCells.forEach((key) => {
     const [x, y] = key.split(',').map(Number);
-    if (!wallCells.has(tileKey(x, y - 1))) addEdge(x, y, 'h');
-    if (!wallCells.has(tileKey(x, y + 1))) addEdge(x, y + 1, 'h');
-    if (!wallCells.has(tileKey(x - 1, y))) addEdge(x, y, 'v');
-    if (!wallCells.has(tileKey(x + 1, y))) addEdge(x + 1, y, 'v');
-  });
-
-  walls.forEach((key) => {
-    const [x, y, orientation] = key.split(',');
-    addEdge(Number(x), Number(y), orientation);
+    if (!floorCells.has(tileKey(x, y - 1)) && !doorEdges.has(edgeKey({ x, y, orientation: 'h' }))) addEdge(x, y, 'h');
+    if (!floorCells.has(tileKey(x, y + 1)) && !doorEdges.has(edgeKey({ x, y: y + 1, orientation: 'h' }))) addEdge(x, y + 1, 'h');
+    if (!floorCells.has(tileKey(x - 1, y)) && !doorEdges.has(edgeKey({ x, y, orientation: 'v' }))) addEdge(x, y, 'v');
+    if (!floorCells.has(tileKey(x + 1, y)) && !doorEdges.has(edgeKey({ x: x + 1, y, orientation: 'v' }))) addEdge(x + 1, y, 'v');
   });
 
   doors.forEach((door) => {
@@ -182,8 +203,13 @@ export function drawDungeonToContext(context, dungeon, width, height) {
   const offsetY = (height - dungeon.gridSize.height * scale) / 2;
   context.fillStyle = '#141923';
   context.fillRect(0, 0, width, height);
-  context.fillStyle = '#222b37';
+  context.fillStyle = '#111722';
   context.fillRect(offsetX, offsetY, dungeon.gridSize.width * scale, dungeon.gridSize.height * scale);
+
+  dungeon.tiles.filter((tile) => tile.type === 'floor').forEach((tile) => {
+    context.fillStyle = '#2b3340';
+    context.fillRect(offsetX + tile.x * scale, offsetY + tile.y * scale, scale, scale);
+  });
 
   dungeon.terrain.forEach((terrain) => {
     context.fillStyle = terrain.type === 'water' ? '#1f6f8b' : '#766235';
@@ -191,10 +217,6 @@ export function drawDungeonToContext(context, dungeon, width, height) {
   });
 
   dungeon.tiles.forEach((tile) => {
-    if (tile.type === 'wall' && !tile.edge) {
-      context.fillStyle = '#635b4a';
-      context.fillRect(offsetX + tile.x * scale, offsetY + tile.y * scale, scale, scale);
-    }
     if (tile.type === 'stairs') {
       context.fillStyle = '#a67c52';
       context.fillRect(offsetX + tile.x * scale + scale * 0.12, offsetY + tile.y * scale + scale * 0.12, scale * 0.76, scale * 0.76);
@@ -232,25 +254,32 @@ export function drawDungeonToContext(context, dungeon, width, height) {
 
 function removeAt(dungeon, point, cell) {
   const edge = nearestEdge(point, cell);
+  const hasDoorOnEdge = point.nearEdge && dungeon.tiles.some((tile) => (
+    tile.type === 'door'
+    && tile.x === cell.x
+    && tile.y === cell.y
+    && edgeKey(tile.edge) === edgeKey(edge)
+  ));
   dungeon.tiles = dungeon.tiles.filter((tile) => {
     if (tile.x !== cell.x || tile.y !== cell.y) return true;
-    if (tile.edge) return edgeKey(tile.edge) !== edgeKey(edge);
-    return false;
+    if (tile.type === 'door') return !hasDoorOnEdge || edgeKey(tile.edge) !== edgeKey(edge);
+    return hasDoorOnEdge;
   });
   dungeon.terrain = dungeon.terrain.filter((terrain) => terrain.x !== cell.x || terrain.y !== cell.y);
   dungeon.lightingGeometry = generateLightingGeometry(dungeon);
   return dungeon;
 }
 
-function setWall(dungeon, point, cell) {
-  if (point.nearEdge) {
-    const edge = nearestEdge(point, cell);
-    return setCellTile(dungeon, { x: cell.x, y: cell.y, type: 'wall', edge });
+function carveFloor(dungeon, cell) {
+  if (!dungeon.tiles.some((tile) => tile.type === 'floor' && tile.x === cell.x && tile.y === cell.y)) {
+    dungeon.tiles.push({ x: cell.x, y: cell.y, type: 'floor' });
   }
-  return setCellTile(dungeon, { x: cell.x, y: cell.y, type: 'wall' });
+  dungeon.lightingGeometry = generateLightingGeometry(dungeon);
+  return dungeon;
 }
 
 function setDoor(dungeon, point, cell) {
+  carveFloor(dungeon, cell);
   const edge = nearestEdge(point, cell);
   const existingDoor = dungeon.tiles.find((tile) => tile.type === 'door' && tile.edge && edgeKey(tile.edge) === edgeKey(edge));
   if (existingDoor) {
@@ -273,7 +302,8 @@ function setDoor(dungeon, point, cell) {
 function setCellTile(dungeon, tile) {
   dungeon.tiles = dungeon.tiles.filter((item) => {
     if (item.x !== tile.x || item.y !== tile.y) return true;
-    if (tile.edge || item.edge) return edgeKey(item.edge || {}) !== edgeKey(tile.edge || {});
+    if (tile.type === 'stairs') return item.type !== 'stairs';
+    if (tile.edge || item.edge) return item.type !== tile.type || edgeKey(item.edge || {}) !== edgeKey(tile.edge || {});
     return item.type !== tile.type;
   });
   dungeon.tiles.push(tile);
@@ -361,9 +391,9 @@ function dungeonBackgroundDataUrl(dungeon) {
   const width = dungeon.gridSize.width * dungeonTileSize;
   const height = dungeon.gridSize.height * dungeonTileSize;
   const rects = [
-    `<rect width="${width}" height="${height}" fill="#222b37"/>`,
+    `<rect width="${width}" height="${height}" fill="#111722"/>`,
+    ...dungeon.tiles.filter((tile) => tile.type === 'floor').map((tile) => `<rect x="${tile.x * dungeonTileSize}" y="${tile.y * dungeonTileSize}" width="${dungeonTileSize}" height="${dungeonTileSize}" fill="#2b3340"/>`),
     ...dungeon.terrain.map((terrain) => `<rect x="${terrain.x * dungeonTileSize}" y="${terrain.y * dungeonTileSize}" width="${dungeonTileSize}" height="${dungeonTileSize}" fill="${terrain.type === 'water' ? '#1f6f8b' : '#766235'}"/>`),
-    ...dungeon.tiles.filter((tile) => tile.type === 'wall' && !tile.edge).map((tile) => `<rect x="${tile.x * dungeonTileSize}" y="${tile.y * dungeonTileSize}" width="${dungeonTileSize}" height="${dungeonTileSize}" fill="#635b4a"/>`),
   ];
   const lines = dungeon.lightingGeometry.map((segment) => `<line x1="${segment.points[0][0]}" y1="${segment.points[0][1]}" x2="${segment.points[1][0]}" y2="${segment.points[1][1]}" stroke="${segment.type === 'door' ? '#f2c94c' : '#f5f3ed'}" stroke-width="${segment.type === 'door' ? 7 : 5}" stroke-linecap="square"/>`);
   const grid = `<defs><pattern id="grid" width="${dungeonTileSize}" height="${dungeonTileSize}" patternUnits="userSpaceOnUse"><path d="M ${dungeonTileSize} 0 L 0 0 0 ${dungeonTileSize}" fill="none" stroke="rgba(245,243,237,0.18)" stroke-width="1"/></pattern></defs><rect width="${width}" height="${height}" fill="url(#grid)"/>`;
