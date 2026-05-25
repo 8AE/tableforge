@@ -10,11 +10,32 @@ export function PlayerViewer({ state }) {
   const [rotation, setRotation] = useState(0);
   const enterFullscreen = () => document.documentElement.requestFullscreen?.();
   const rotateBoard = (degrees) => setRotation((current) => (current + degrees + 360) % 360);
+  const clampZoom = (value) => Math.max(0.4, Math.min(10, value));
 
   useEffect(() => {
     const onFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onFullscreen);
     return () => document.removeEventListener('fullscreenchange', onFullscreen);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (['input', 'select', 'textarea'].includes(event.target?.tagName?.toLowerCase())) return;
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        setZoom((current) => clampZoom(current + 0.1));
+      }
+      if (event.key === '-' || event.key === '_') {
+        event.preventDefault();
+        setZoom((current) => clampZoom(current - 0.1));
+      }
+      if (event.key === '0') {
+        event.preventDefault();
+        setZoom(1);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   if (!state) {
@@ -48,6 +69,27 @@ export function PlayerViewer({ state }) {
         </div>
       )}
       <BoardCanvas board={board} view="player" tool="viewer" fitToViewport playerZoom={zoom} playerRotation={rotation} />
+      {state.diceRoll && <DiceOverlay roll={state.diceRoll} />}
     </section>
   );
+}
+
+function DiceOverlay({ roll }) {
+  return (
+    <div className="dice-overlay" key={roll.id}>
+      <div className="dice-tray">
+        {roll.rolls.map((value, index) => (
+          <div className={`dice-cube dice-d${diceShape(roll.sides)}`} key={`${roll.id}-${index}`} style={{ '--delay': `${index * 90}ms` }}>
+            <span>{value}</span>
+          </div>
+        ))}
+      </div>
+      <strong>{roll.notation}: {roll.total}</strong>
+    </div>
+  );
+}
+
+function diceShape(sides) {
+  if ([4, 6, 8, 10, 12, 20].includes(Number(sides))) return Number(sides);
+  return 20;
 }

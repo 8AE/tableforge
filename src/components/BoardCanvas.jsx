@@ -32,6 +32,7 @@ export function BoardCanvas({
   onAddLightWall,
   onMoveLightWall,
   onRemoveLightReveal,
+  onLiveMeasurement,
   onDeleteSelection,
   onDuplicateSelection,
   fitToViewport = false,
@@ -66,15 +67,32 @@ export function BoardCanvas({
     () => board.drawings.filter((drawing) => view === 'dm' || (drawing.layer === 'player' && drawing.visible !== false)),
     [board.drawings, view],
   );
-  const visionPolygons = useMemo(() => (
+  const brightPolygons = useMemo(() => (
     playerTokens
-      .filter((token) => token.layer === 'player' && token.visible && token.visionEnabled !== false && Number(token.visionFeet) > 0)
-      .map((token) => ({ id: token.id, points: visionPolygonPoints(token, lighting.walls, tile) }))
+      .filter((token) => token.visionEnabled !== false && Number(token.visionBrightFeet ?? token.visionFeet) > 0)
+      .map((token) => ({ id: `vision-bright-${token.id}`, points: visionPolygonPoints(token, lighting.walls, tile, token.visionBrightFeet ?? token.visionFeet) }))
   ), [playerTokens, lighting.walls, tile]);
+  const dimPolygons = useMemo(() => (
+    playerTokens
+      .filter((token) => token.visionEnabled !== false && Number(token.visionDimFeet ?? token.visionFeet) > 0)
+      .map((token) => ({ id: `vision-dim-${token.id}`, points: visionPolygonPoints(token, lighting.walls, tile, token.visionDimFeet ?? token.visionFeet) }))
+  ), [playerTokens, lighting.walls, tile]);
+  const lightPolygons = useMemo(() => {
+    const playerVision = [...brightPolygons, ...dimPolygons];
+    return board.tokens
+      .filter((token) => token.visible !== false && (Number(token.lightBrightFeet) > 0 || Number(token.lightDimFeet) > 0))
+      .filter((token) => token.layer === 'player' || pointIsInAnyPolygon(tokenCenterPixels(token, tile), playerVision))
+      .flatMap((token) => [
+        Number(token.lightBrightFeet) > 0 ? { id: `light-bright-${token.id}`, tone: 'bright', points: visionPolygonPoints(token, lighting.walls, tile, token.lightBrightFeet) } : null,
+        Number(token.lightDimFeet) > 0 ? { id: `light-dim-${token.id}`, tone: 'dim', points: visionPolygonPoints(token, lighting.walls, tile, token.lightDimFeet) } : null,
+      ].filter(Boolean));
+  }, [board.tokens, brightPolygons, dimPolygons, lighting.walls, tile]);
+  const allBrightPolygons = useMemo(() => [...brightPolygons, ...lightPolygons.filter((item) => item.tone === 'bright')], [brightPolygons, lightPolygons]);
+  const allDimPolygons = useMemo(() => [...dimPolygons, ...lightPolygons], [dimPolygons, lightPolygons]);
   const visibleTokens = useMemo(() => {
     if (view === 'dm' || !lighting.enabled) return dmTokens;
-    return dmTokens.filter((token) => tokenHasVision(token) || tokenIsInRevealedLight(token, lighting, visionPolygons, tile));
-  }, [dmTokens, lighting, tile, view, visionPolygons]);
+    return dmTokens.filter((token) => tokenHasVision(token) || tokenIsInRevealedLight(token, lighting, allDimPolygons, tile));
+  }, [allDimPolygons, dmTokens, lighting, tile, view]);
 
   useEffect(() => {
     if (!fitToViewport || !shellRef.current) {
@@ -119,6 +137,7 @@ export function BoardCanvas({
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = pointFromEvent(event);
     const snapped = snapToTile(point, board);
+    const wallPoint = lighting.snapWallsToGrid ? snapped : clampPoint(point, board);
     const token = tokenAt(point);
     const drawing = drawingAt(point);
     const wall = wallAt(point);
@@ -162,7 +181,7 @@ export function BoardCanvas({
 
     if (tool === 'select' && wall) {
       setSelected({ type: 'wall', id: wall.id });
-      setDrag({ type: 'wall-move', id: wall.id, start: snapped, original: structuredClone(wall), preview: structuredClone(wall) });
+      setDrag({ type: 'wall-move', id: wall.id, start: wall.freeform ? clampPoint(point, board) : snapped, original: structuredClone(wall), preview: structuredClone(wall) });
       return;
     }
 
@@ -173,7 +192,7 @@ export function BoardCanvas({
 
     if (['ruler', 'square', 'circle', 'cone', 'shape', 'light', 'wall'].includes(tool)) {
       const type = tool === 'light' && event.button === 2 ? 'light-hide' : tool;
-      setDrag({ type, start: snapped, end: snapped });
+      setDrag({ type, start: type === 'wall' ? wallPoint : snapped, end: type === 'wall' ? wallPoint : snapped, freeform: type === 'wall' && !lighting.snapWallsToGrid });
       return;
     }
 
@@ -186,6 +205,7 @@ export function BoardCanvas({
     if (!drag) return;
     const point = pointFromEvent(event);
     const snapped = snapToTile(point, board);
+    const wallPoint = lighting.snapWallsToGrid ? snapped : clampPoint(point, board);
 
     if (drag.type === 'background') {
       onMoveBackground({
@@ -223,8 +243,9 @@ export function BoardCanvas({
     }
 
     if (drag.type === 'wall-move') {
-      const dx = snapped.x - drag.start.x;
-      const dy = snapped.y - drag.start.y;
+      const current = drag.original.freeform ? clampPoint(point, board) : snapped;
+      const dx = current.x - drag.start.x;
+      const dy = current.y - drag.start.y;
       setDrag({
         ...drag,
         preview: {
@@ -241,7 +262,10 @@ export function BoardCanvas({
       return;
     }
 
-    setDrag({ ...drag, end: snapped });
+    const nextEnd = drag.type === 'wall' && drag.freeform ? wallPoint : snapped;
+    const nextDrag = { ...drag, end: nextEnd };
+    setDrag(nextDrag);
+    if (drag.type === 'ruler') onLiveMeasurement?.({ start: drag.start, end: snapped });
   };
 
   const onBoardPointerDown = (event) => {
@@ -308,6 +332,7 @@ export function BoardCanvas({
         id: uid('wall'),
         start: drag.start,
         end: drag.end,
+        freeform: Boolean(drag.freeform),
       });
     }
     if (['square', 'circle', 'cone', 'shape'].includes(drag.type)) {
@@ -323,6 +348,21 @@ export function BoardCanvas({
         end: drag.end,
         visible: true,
       });
+    }
+    if (drag.type === 'ruler') {
+      if (feetBetween(drag.start, drag.end) > 0) {
+        onAddDrawing({
+          id: uid('measure'),
+          type: 'measurement',
+          layer: 'player',
+          color: '#f8fafc',
+          strokeWidth: 4,
+          start: drag.start,
+          end: drag.end,
+          visible: true,
+        });
+      }
+      onLiveMeasurement?.(null);
     }
     setDrag(null);
   };
@@ -392,28 +432,50 @@ export function BoardCanvas({
                 <rect x="0" y="0" width={width} height={height} fill="white" />
                 {lighting.reveals.map((reveal) => renderRevealHole(reveal, tile))}
                 {lighting.hiddenReveals.map((reveal) => renderRevealHole(reveal, tile, 'white'))}
-                {visionPolygons.map((token) => (
+                {allDimPolygons.map((token) => (
                   <polygon
-                    key={`vision-${token.id}`}
+                    key={`dim-${token.id}`}
                     points={token.points}
                     fill="black"
                   />
                 ))}
               </mask>
+              <clipPath id={`dim-clip-${board.id}`}>
+                {allDimPolygons.map((token) => <polygon key={`dim-clip-${token.id}`} points={token.points} />)}
+              </clipPath>
+              <mask id={`bright-mask-${board.id}`}>
+                <rect x="0" y="0" width={width} height={height} fill="white" />
+                {lighting.reveals.map((reveal) => renderRevealHole(reveal, tile))}
+                {allBrightPolygons.map((token) => <polygon key={`bright-${token.id}`} points={token.points} fill="black" />)}
+              </mask>
             </defs>
             {[...displayDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected))}
             {view === 'dm' && displayWalls.map((wall) => renderLightingWall(wall, tile, selected))}
+            {board.liveMeasurement && drag?.type !== 'ruler' && renderLiveShape({ type: 'ruler', ...board.liveMeasurement }, tile)}
             {liveShape && renderLiveShape(liveShape, tile)}
             {lighting.enabled && (
-              <rect
-                className={view === 'dm' ? 'lighting-preview' : 'lighting-darkness'}
-                x="0"
-                y="0"
-                width={width}
-                height={height}
-                fill={`rgba(0, 0, 0, ${lighting.darkness})`}
-                mask={`url(#lighting-mask-${board.id})`}
-              />
+              <>
+                <rect
+                  className={view === 'dm' ? 'lighting-preview' : 'lighting-darkness'}
+                  x="0"
+                  y="0"
+                  width={width}
+                  height={height}
+                  fill={`rgba(0, 0, 0, ${lighting.darkness})`}
+                  mask={`url(#lighting-mask-${board.id})`}
+                />
+                <g clipPath={`url(#dim-clip-${board.id})`}>
+                  <rect
+                    className="lighting-dim"
+                    x="0"
+                    y="0"
+                    width={width}
+                    height={height}
+                    fill={`rgba(0, 0, 0, ${Math.min(0.55, lighting.darkness * 0.48)})`}
+                    mask={`url(#bright-mask-${board.id})`}
+                  />
+                </g>
+              </>
             )}
           </svg>
 
@@ -462,7 +524,34 @@ function renderDrawing(drawing, tile, selected) {
       />
     );
   }
+  if (drawing.type === 'measurement') {
+    return renderMeasurement(drawing, tile, isSelected);
+  }
   return renderStoredShape(drawing, tile, isSelected);
+}
+
+function renderMeasurement(drawing, tile, isSelected = false) {
+  const start = drawing.start;
+  const end = drawing.end;
+  const x1 = (start.x + 0.5) * tile;
+  const y1 = (start.y + 0.5) * tile;
+  const x2 = (end.x + 0.5) * tile;
+  const y2 = (end.y + 0.5) * tile;
+  return (
+    <g key={drawing.id} className={isSelected ? 'selected-drawing' : ''}>
+      <line
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
+        stroke={drawing.color || '#f8fafc'}
+        strokeWidth={isSelected ? (drawing.strokeWidth || 4) + 2 : drawing.strokeWidth || 4}
+        strokeLinecap="round"
+        markerEnd="url(#arrow)"
+      />
+      <MeasureLabel x={(x1 + x2) / 2 + 8} y={(y1 + y2) / 2 - 8} text={`${feetBetween(start, end)} ft`} />
+    </g>
+  );
 }
 
 function renderStoredShape(drawing, tile, isSelected = false) {
@@ -520,16 +609,7 @@ function renderLiveShape(shape, tile) {
     return <rect key="live-light" className={shape.type === 'light-hide' ? 'live-light-hide' : 'live-light-reveal'} x={box.x * tile} y={box.y * tile} width={box.w * tile} height={box.h * tile} rx="4" />;
   }
   if (shape.type === 'ruler') {
-    const x1 = (start.x + 0.5) * tile;
-    const y1 = (start.y + 0.5) * tile;
-    const x2 = (end.x + 0.5) * tile;
-    const y2 = (end.y + 0.5) * tile;
-    return (
-      <g key="live-ruler">
-        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#f8fafc" strokeWidth="4" markerEnd="url(#arrow)" />
-        <MeasureLabel x={(x1 + x2) / 2 + 8} y={(y1 + y2) / 2 - 8} text={`${feetBetween(start, end)} ft`} />
-      </g>
-    );
+    return renderMeasurement({ id: 'live-ruler', type: 'measurement', start, end, color: '#f8fafc', strokeWidth: 4 }, tile);
   }
   return renderStoredShape({
     id: 'live-shape',
@@ -571,7 +651,7 @@ function renderRevealHole(reveal, tile, fill = 'black') {
 }
 
 function tokenHasVision(token) {
-  return token.visionEnabled !== false && Number(token.visionFeet) > 0;
+  return token.visionEnabled !== false && (Number(token.visionBrightFeet ?? token.visionFeet) > 0 || Number(token.visionDimFeet ?? token.visionFeet) > 0);
 }
 
 function tokenIsInRevealedLight(token, lighting, visionPolygons, tile) {
@@ -587,6 +667,24 @@ function tokenIsInRevealedLight(token, lighting, visionPolygons, tile) {
     { x: point.x * tile, y: point.y * tile },
     polygon.points,
   ));
+}
+
+function tokenCenterPixels(token, tile) {
+  return {
+    x: (token.x + token.size / 2) * tile,
+    y: (token.y + token.size / 2) * tile,
+  };
+}
+
+function pointIsInAnyPolygon(point, polygons) {
+  return polygons.some((polygon) => pointInPolygonPixels(point, polygon.points));
+}
+
+function clampPoint(point, board) {
+  return {
+    x: Math.max(0, Math.min(board.columns, point.x)),
+    y: Math.max(0, Math.min(board.rows, point.y)),
+  };
 }
 
 function pointInBox(point, box) {

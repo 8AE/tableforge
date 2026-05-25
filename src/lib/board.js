@@ -4,6 +4,7 @@ export const tileFeet = 5;
 export const defaultLighting = {
   enabled: false,
   darkness: 0.86,
+  snapWallsToGrid: true,
   reveals: [],
   hiddenReveals: [],
   walls: [],
@@ -83,6 +84,7 @@ export function migrateState(raw) {
     return {
       ...raw,
       fiveEToolsBaseUrl: raw.fiveEToolsBaseUrl || 'https://5e.tools/',
+      diceRoll: raw.diceRoll || null,
       tokenLibrary: (raw.tokenLibrary || []).map((token) => normalizeLibraryToken(token)),
       boards: raw.boards.map((board) => ({
         ...board,
@@ -92,7 +94,7 @@ export function migrateState(raw) {
           hiddenReveals: board.lighting?.hiddenReveals || [],
           walls: board.lighting?.walls || [],
         },
-        tokens: (board.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', visionEnabled: true, ...token })),
+        tokens: (board.tokens || []).map((token) => normalizeBoardToken(token)),
         drawings: (board.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
       })),
       playerBoardId: raw.playerBoardId || raw.activeBoardId || raw.boards[0].id,
@@ -112,7 +114,7 @@ export function migrateState(raw) {
         fitToBoard: false,
       },
       lighting: { ...defaultLighting },
-      tokens: (raw.tokens || []).map((token) => ({ visionFeet: 0, visionMode: 'darkvision', visionEnabled: true, ...token })),
+      tokens: (raw.tokens || []).map((token) => normalizeBoardToken(token)),
       drawings: (raw.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
     };
     return { boards: [migrated], activeBoardId: migrated.id, playerBoardId: migrated.id, tokenLibrary: [], fiveEToolsBaseUrl: 'https://5e.tools/' };
@@ -131,8 +133,25 @@ export function normalizeLibraryToken(token = {}) {
     size: Number(token.size) || 1,
     visible: token.visible ?? true,
     visionFeet: Number(token.visionFeet) || 0,
+    visionBrightFeet: Number(token.visionBrightFeet ?? token.visionFeet) || 0,
+    visionDimFeet: Number(token.visionDimFeet ?? token.visionFeet) || 0,
+    lightBrightFeet: Number(token.lightBrightFeet) || 0,
+    lightDimFeet: Number(token.lightDimFeet) || 0,
     visionMode: token.visionMode || 'darkvision',
     visionEnabled: token.visionEnabled ?? true,
+  };
+}
+
+export function normalizeBoardToken(token = {}) {
+  return {
+    visionFeet: 0,
+    visionBrightFeet: Number(token.visionBrightFeet ?? token.visionFeet) || 0,
+    visionDimFeet: Number(token.visionDimFeet ?? token.visionFeet) || 0,
+    lightBrightFeet: Number(token.lightBrightFeet) || 0,
+    lightDimFeet: Number(token.lightDimFeet) || 0,
+    visionMode: 'darkvision',
+    visionEnabled: true,
+    ...token,
   };
 }
 
@@ -239,17 +258,19 @@ export function boxesOverlap(a, b) {
 }
 
 export function wallEndpoints(wall, tile) {
+  const offset = wall.freeform ? 0 : 0.5;
   return {
-    x1: (wall.start.x + 0.5) * tile,
-    y1: (wall.start.y + 0.5) * tile,
-    x2: (wall.end.x + 0.5) * tile,
-    y2: (wall.end.y + 0.5) * tile,
+    x1: (wall.start.x + offset) * tile,
+    y1: (wall.start.y + offset) * tile,
+    x2: (wall.end.x + offset) * tile,
+    y2: (wall.end.y + offset) * tile,
   };
 }
 
 export function isPointNearWall(point, wall) {
-  const start = { x: wall.start.x + 0.5, y: wall.start.y + 0.5 };
-  const end = { x: wall.end.x + 0.5, y: wall.end.y + 0.5 };
+  const offset = wall.freeform ? 0 : 0.5;
+  const start = { x: wall.start.x + offset, y: wall.start.y + offset };
+  const end = { x: wall.end.x + offset, y: wall.end.y + offset };
   const lengthSquared = ((end.x - start.x) ** 2) + ((end.y - start.y) ** 2);
   if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y) <= 0.25;
   const ratio = Math.max(0, Math.min(1, (((point.x - start.x) * (end.x - start.x)) + ((point.y - start.y) * (end.y - start.y))) / lengthSquared));
@@ -260,8 +281,8 @@ export function isPointNearWall(point, wall) {
   return Math.hypot(point.x - closest.x, point.y - closest.y) <= 0.28;
 }
 
-export function visionPolygonPoints(token, walls, tile) {
-  const radius = (Number(token.visionFeet) / tileFeet) * tile;
+export function visionPolygonPoints(token, walls, tile, radiusFeet = token.visionFeet) {
+  const radius = (Number(radiusFeet) / tileFeet) * tile;
   if (!radius) return '';
 
   const origin = {
@@ -329,8 +350,23 @@ export function isPointInDrawing(point, drawing) {
   if (drawing.type === 'path') {
     return drawing.points.some((pathPoint) => Math.abs(pathPoint.x - point.x) < 0.35 && Math.abs(pathPoint.y - point.y) < 0.35);
   }
+  if (drawing.type === 'measurement') {
+    const start = { x: drawing.start.x + 0.5, y: drawing.start.y + 0.5 };
+    const end = { x: drawing.end.x + 0.5, y: drawing.end.y + 0.5 };
+    return distanceToSegment(point, start, end) <= 0.35;
+  }
   const box = shapeBox(drawing);
   return point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+}
+
+function distanceToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y);
+  const ratio = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  const projection = { x: start.x + ratio * dx, y: start.y + ratio * dy };
+  return Math.hypot(point.x - projection.x, point.y - projection.y);
 }
 
 export function offsetDrawing(drawing, dx, dy) {

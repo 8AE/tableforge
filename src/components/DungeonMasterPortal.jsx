@@ -13,12 +13,14 @@ import {
   Library,
   Layers,
   MousePointer2,
+  Music,
   Pencil,
   Plus,
   Redo2,
   Send,
   Trash2,
   Undo2,
+  Upload,
   Users,
   X,
 } from 'lucide-react';
@@ -34,6 +36,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1 });
   const [drawColor, setDrawColor] = useState('#36d399');
   const [drawLayer, setDrawLayer] = useState('player');
+  const [diceNotation, setDiceNotation] = useState('1d20');
   const [selected, setSelected] = useState(null);
   const [clipboard, setClipboard] = useState(null);
   const [tokensExpanded, setTokensExpanded] = useState(true);
@@ -48,8 +51,13 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [mapResults, setMapResults] = useState([]);
   const [mapImportError, setMapImportError] = useState('');
   const [isSearchingMaps, setIsSearchingMaps] = useState(false);
+  const [assets, setAssets] = useState([]);
+  const [assetCategory, setAssetCategory] = useState('token');
+  const [assetError, setAssetError] = useState('');
+  const [isUploadingAsset, setIsUploadingAsset] = useState(false);
   const board = getBoard(state, state.activeBoardId);
   const tokenLibrary = state.tokenLibrary || [];
+  const imageAssets = assets.filter((asset) => asset.type === 'image');
 
   const updateBoard = (patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, ...patch })));
@@ -87,6 +95,63 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const updateFiveEToolsBaseUrl = (baseUrl) => {
     setState((current) => ({ ...current, fiveEToolsBaseUrl: baseUrl }), { skipHistory: true });
   };
+  const updateLiveMeasurement = (measurement) => {
+    setState((current) => updateActiveBoard(current, (active) => ({ ...active, liveMeasurement: measurement })), { skipHistory: true });
+  };
+  const rollDice = (notation = '1d20') => {
+    const match = notation.match(/^(\d*)d(\d+)$/i);
+    if (!match) return;
+    const count = Math.max(1, Math.min(20, Number(match?.[1] || 1)));
+    const sides = Number(match?.[2] || 20);
+    const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+    setState((current) => ({ ...current, diceRoll: { id: uid('dice'), notation: `${count}d${sides}`, sides, rolls, total: rolls.reduce((sum, roll) => sum + roll, 0) } }), { skipHistory: true });
+  };
+
+  const fetchProjectAssets = async () => {
+    if (!openProjectId) return;
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets`);
+      if (!response.ok) throw new Error('Unable to load project assets.');
+      const data = await response.json();
+      setAssets(data.assets || []);
+      setAssetError('');
+    } catch (error) {
+      setAssetError(error.message || 'Unable to load project assets.');
+    }
+  };
+
+  useEffect(() => {
+    setAssets([]);
+    fetchProjectAssets();
+  }, [openProjectId]);
+
+  const uploadProjectAssets = async (files) => {
+    const fileList = Array.from(files || []);
+    if (!openProjectId || !fileList.length) return;
+    setAssetError('');
+    setIsUploadingAsset(true);
+    try {
+      for (const file of fileList) {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('category', assetCategory);
+        form.append('assetType', file.type.startsWith('audio/') ? 'audio' : 'image');
+        const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets`, {
+          method: 'POST',
+          body: form,
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || `Unable to upload ${file.name}.`);
+        }
+      }
+      await fetchProjectAssets();
+    } catch (error) {
+      setAssetError(error.message || 'Unable to upload asset.');
+    } finally {
+      setIsUploadingAsset(false);
+    }
+  };
 
   const addToken = (point) => {
     const token = {
@@ -99,6 +164,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       size: Number(tokenDraft.size) || 1,
       visible: true,
       visionEnabled: true,
+      visionBrightFeet: 0,
+      visionDimFeet: 0,
+      lightBrightFeet: 0,
+      lightDimFeet: 0,
+      image: tokenDraft.image || '',
     };
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     setSelected({ type: 'token', id: token.id });
@@ -225,6 +295,15 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     setMapQuery(map.displayTitle);
   };
 
+  const useAssetAsMap = (asset) => {
+    updateBackground({ src: asset.path, opacity: 1, fitToBoard: true, x: 0, y: 0, scale: 1 });
+    setMapImportError('');
+  };
+
+  const useAssetForTokenDraft = (asset) => {
+    setTokenDraft((draft) => ({ ...draft, image: asset.path }));
+  };
+
   const addDrawing = (drawing) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
     setSelected({ type: 'drawing', id: drawing.id });
@@ -297,6 +376,24 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     updateLighting({ walls: [] });
   };
 
+  const nudgeSelection = (dx, dy) => {
+    if (!selected) return;
+    const amount = selected.type === 'wall' ? 0.2 : 1;
+    if (selected.type === 'token' && selectedToken) updateToken(selected.id, { x: Math.max(0, selectedToken.x + dx * amount), y: Math.max(0, selectedToken.y + dy * amount) });
+    if (selected.type === 'drawing' && selectedDrawing) updateDrawing(selected.id, offsetDrawing(selectedDrawing, dx * amount, dy * amount));
+    if (selected.type === 'wall') {
+      updateLighting({
+        walls: (board.lighting?.walls || []).map((wall) => wall.id === selected.id
+          ? {
+              ...wall,
+              start: { x: wall.start.x + dx * amount, y: wall.start.y + dy * amount },
+              end: { x: wall.end.x + dx * amount, y: wall.end.y + dy * amount },
+            }
+          : wall),
+      });
+    }
+  };
+
   const copySelection = () => {
     const item = selected?.type === 'token'
       ? board.tokens.find((token) => token.id === selected.id)
@@ -366,11 +463,27 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     }
   };
 
+  const selectedDrawing = selected?.type === 'drawing' ? board.drawings.find((drawing) => drawing.id === selected.id) : null;
+  const selectedToken = selected?.type === 'token' ? board.tokens.find((token) => token.id === selected.id) : null;
+  const selectedWall = selected?.type === 'wall' ? board.lighting?.walls?.find((wall) => wall.id === selected.id) : null;
+
   useEffect(() => {
     const onKeyDown = (event) => {
       const mod = event.metaKey || event.ctrlKey;
       const tag = event.target?.tagName?.toLowerCase();
       if (['input', 'select', 'textarea'].includes(tag)) return;
+      const arrowDeltas = {
+        arrowup: [0, -1],
+        arrowdown: [0, 1],
+        arrowleft: [-1, 0],
+        arrowright: [1, 0],
+      };
+      const arrowDelta = arrowDeltas[event.key.toLowerCase()];
+      if (arrowDelta && selected) {
+        event.preventDefault();
+        nudgeSelection(arrowDelta[0], arrowDelta[1]);
+        return;
+      }
       if (['backspace', 'delete'].includes(event.key.toLowerCase()) && selected) {
         event.preventDefault();
         deleteSelection();
@@ -399,11 +512,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [board, selected, clipboard, undo, redo]);
-
-  const selectedDrawing = selected?.type === 'drawing' ? board.drawings.find((drawing) => drawing.id === selected.id) : null;
-  const selectedToken = selected?.type === 'token' ? board.tokens.find((token) => token.id === selected.id) : null;
-  const selectedWall = selected?.type === 'wall' ? board.lighting?.walls?.find((wall) => wall.id === selected.id) : null;
+  }, [board, selected, selectedToken, selectedDrawing, clipboard, undo, redo]);
 
   return (
     <>
@@ -418,6 +527,51 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
         <Panel title="Project" icon={<Layers size={16} />}>
           <button className="command" title="Return to the project home screen" onClick={leaveProject}><Layers size={16} /> Project home</button>
+        </Panel>
+
+        <Panel title="Asset Manager" icon={<Upload size={16} />}>
+          <label>
+            Asset category
+            <select value={assetCategory} onChange={(event) => setAssetCategory(event.target.value)}>
+              <option value="token">Token</option>
+              <option value="map">Map</option>
+              <option value="music">Background music</option>
+              <option value="image">Image</option>
+              <option value="audio">Audio</option>
+            </select>
+          </label>
+          <label
+            className="asset-dropzone"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              uploadProjectAssets(event.dataTransfer.files);
+            }}
+          >
+            <Upload size={18} />
+            <span>{isUploadingAsset ? 'Uploading...' : 'Drop files or browse'}</span>
+            <small>.png, .jpeg, .webp, .mp3, .wav</small>
+            <input type="file" multiple accept=".png,.jpg,.jpeg,.webp,.mp3,.wav,image/png,image/jpeg,image/webp,audio/mpeg,audio/wav" onChange={(event) => uploadProjectAssets(event.target.files)} />
+          </label>
+          {assetError && <p className="form-error">{assetError}</p>}
+          <div className="project-asset-grid">
+            {assets.map((asset) => (
+              <div className="project-asset-card" key={asset.id}>
+                <div className="project-asset-preview">
+                  {asset.type === 'image' ? <img src={asset.path} alt="" /> : <Music size={22} />}
+                </div>
+                <strong title={asset.name}>{asset.name}</strong>
+                <span>{asset.category} · {asset.type}</span>
+                {asset.type === 'image' && (
+                  <div className="project-asset-actions">
+                    <button title="Use this image for new tokens" onClick={() => useAssetForTokenDraft(asset)}>Token</button>
+                    <button title="Use this image as the active board background" onClick={() => useAssetAsMap(asset)}>Map</button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {!assets.length && <p className="empty-note">No project assets uploaded yet.</p>}
+          </div>
         </Panel>
 
         <Panel title="Boards" icon={<Layers size={16} />}>
@@ -449,8 +603,20 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             Darkness
             <input type="range" min="0.35" max="0.98" step="0.01" value={board.lighting?.darkness ?? 0.86} onChange={(event) => updateLighting({ darkness: Number(event.target.value) })} />
           </label>
+          <label className="check-row" title="When disabled, wall endpoints can be placed anywhere on the map">
+            <input type="checkbox" checked={board.lighting?.snapWallsToGrid !== false} onChange={(event) => updateLighting({ snapWallsToGrid: event.target.checked })} />
+            Snap lighting walls to grid
+          </label>
           <button className="command" title="Remove all manually revealed lighting areas" onClick={clearLightReveals}><Eraser size={16} /> Clear reveal areas</button>
           <button className="command" title="Remove all lighting walls from this board" onClick={clearLightWalls}><Eraser size={16} /> Clear light walls</button>
+        </Panel>
+
+        <Panel title="Dice" icon={<Grid2X2 size={16} />}>
+          <label>
+            Dice notation
+            <input value={diceNotation} onChange={(event) => setDiceNotation(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') rollDice(diceNotation.trim()); }} placeholder="5d10" />
+          </label>
+          <button className="command accent" title="Roll dice on the player viewer" onClick={() => rollDice(diceNotation.trim())}>Roll dice</button>
         </Panel>
 
         <Panel title="Board" icon={<Image size={16} />}>
@@ -480,6 +646,19 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             Background image
             <input type="file" accept="image/*" onChange={(event) => loadImage(event, (src) => updateBackground({ src }))} />
           </label>
+          {imageAssets.length > 0 && (
+            <details className="asset-picker">
+              <summary>Choose from Project Assets</summary>
+              <div className="asset-picker-grid">
+                {imageAssets.map((asset) => (
+                  <button key={asset.id} title={`Use ${asset.name} as the active board background`} onClick={() => useAssetAsMap(asset)}>
+                    <img src={asset.path} alt="" />
+                    <span>{asset.name}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
           <div className="map-import">
             <label>
               5e.tools base URL
@@ -581,6 +760,25 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               <input type="number" min="1" max="6" value={tokenDraft.size} onChange={(event) => setTokenDraft({ ...tokenDraft, size: event.target.value })} />
             </label>
           </div>
+          {tokenDraft.image && (
+            <div className="selected-asset-row">
+              <img src={tokenDraft.image} alt="" />
+              <button className="command" onClick={() => setTokenDraft({ ...tokenDraft, image: '' })}>Clear token image</button>
+            </div>
+          )}
+          {imageAssets.length > 0 && (
+            <details className="asset-picker">
+              <summary>Pick token image from assets</summary>
+              <div className="asset-picker-grid">
+                {imageAssets.map((asset) => (
+                  <button key={asset.id} title={`Use ${asset.name} for new tokens`} onClick={() => useAssetForTokenDraft(asset)}>
+                    <img src={asset.path} alt="" />
+                    <span>{asset.name}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
         </Panel>
 
         {selectedToken && (
@@ -604,15 +802,44 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               Token image
               <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateToken(selectedToken.id, { image }))} />
             </label>
+            {imageAssets.length > 0 && (
+              <details className="asset-picker">
+                <summary>Pick image from project assets</summary>
+                <div className="asset-picker-grid">
+                  {imageAssets.map((asset) => (
+                    <button key={asset.id} title={`Use ${asset.name} for this token`} onClick={() => updateToken(selectedToken.id, { image: asset.path })}>
+                      <img src={asset.path} alt="" />
+                      <span>{asset.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </details>
+            )}
             <label className="check-row" title="Toggle whether this token reveals darkness with its vision distance">
               <input type="checkbox" checked={selectedToken.visionEnabled !== false} onChange={(event) => updateToken(selectedToken.id, { visionEnabled: event.target.checked })} />
               Vision enabled
             </label>
             <div className="split">
               <label title="How far this token can see when board lighting is enabled">
-                Vision feet
-                <input type="number" min="0" step="5" value={selectedToken.visionFeet || 0} onChange={(event) => updateToken(selectedToken.id, { visionFeet: Number(event.target.value) })} />
+                Bright vision
+                <input type="number" min="0" step="5" value={selectedToken.visionBrightFeet ?? selectedToken.visionFeet ?? 0} onChange={(event) => updateToken(selectedToken.id, { visionBrightFeet: Number(event.target.value), visionFeet: Number(event.target.value) })} />
               </label>
+              <label title="Dim vision reaches beyond bright vision">
+                Dim vision
+                <input type="number" min="0" step="5" value={selectedToken.visionDimFeet ?? selectedToken.visionFeet ?? 0} onChange={(event) => updateToken(selectedToken.id, { visionDimFeet: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="split">
+              <label title="Bright light emitted by this token">
+                Bright light
+                <input type="number" min="0" step="5" value={selectedToken.lightBrightFeet || 0} onChange={(event) => updateToken(selectedToken.id, { lightBrightFeet: Number(event.target.value) })} />
+              </label>
+              <label title="Dim light emitted by this token">
+                Dim light
+                <input type="number" min="0" step="5" value={selectedToken.lightDimFeet || 0} onChange={(event) => updateToken(selectedToken.id, { lightDimFeet: Number(event.target.value) })} />
+              </label>
+            </div>
+            <div className="split">
               <label title="Label this token's vision type">
                 Vision type
                 <select value={selectedToken.visionMode || 'darkvision'} onChange={(event) => updateToken(selectedToken.id, { visionMode: event.target.value })}>
@@ -706,7 +933,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                 <div className="asset-row drawing-row" key={drawing.id}>
                   <span className="swatch square-swatch" style={{ background: drawing.color }} />
                   <button className="asset-name" title="Select drawing" onClick={() => setSelected({ type: 'drawing', id: drawing.id })}>
-                    {drawing.type === 'path' ? 'Freehand' : drawing.shape || 'Shape'} {index + 1}
+                    {drawing.type === 'measurement' ? 'Measurement' : drawing.type === 'path' ? 'Freehand' : drawing.shape || 'Shape'} {index + 1}
                   </button>
                   <button title="Toggle drawing visibility" onClick={() => updateDrawing(drawing.id, { visible: drawing.visible === false })}>
                     {drawing.visible === false ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -809,6 +1036,19 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                           Token image
                           <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateLibraryToken(libraryToken.id, { image }))} />
                         </label>
+                        {imageAssets.length > 0 && (
+                          <details className="asset-picker">
+                            <summary>Pick image from project assets</summary>
+                            <div className="asset-picker-grid">
+                              {imageAssets.map((asset) => (
+                                <button key={asset.id} title={`Use ${asset.name} for this library token`} onClick={() => updateLibraryToken(libraryToken.id, { image: asset.path })}>
+                                  <img src={asset.path} alt="" />
+                                  <span>{asset.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </details>
+                        )}
                         <div className="split">
                           <label>
                             Layer
@@ -870,6 +1110,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onAddLightWall={addLightWall}
           onMoveLightWall={moveLightWall}
           onRemoveLightReveal={removeLightReveal}
+          onLiveMeasurement={updateLiveMeasurement}
           onDeleteSelection={deleteSelection}
           onDuplicateSelection={duplicateSelection}
         />
