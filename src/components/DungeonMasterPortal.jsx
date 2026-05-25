@@ -32,8 +32,9 @@ import { Panel } from './Panel';
 import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
 import { boxesOverlap, defaultLighting, getBoard, makeBoard, normalizeLibraryToken, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
+import { dungeonToBoard, normalizeDungeon } from '../lib/dungeon';
 
-export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, undo, redo, canUndo, canRedo }) {
+export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
   const [tool, setTool] = useState('select');
   const [activeLayer, setActiveLayer] = useState('player');
   const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1 });
@@ -60,6 +61,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [assetCategory, setAssetCategory] = useState('token');
   const [assetError, setAssetError] = useState('');
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
+  const [isDungeonImportOpen, setIsDungeonImportOpen] = useState(false);
+  const [dungeonLibrary, setDungeonLibrary] = useState([]);
+  const [dungeonImportError, setDungeonImportError] = useState('');
   const board = getBoard(state, state.activeBoardId);
   const tokenLibrary = state.tokenLibrary || [];
   const imageAssets = assets.filter((asset) => asset.type === 'image');
@@ -343,6 +347,37 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     next.tokens = [];
     next.drawings = [];
     setState((current) => ({ ...current, boards: [...current.boards, next], activeBoardId: next.id }));
+  };
+
+  const openDungeonImport = async () => {
+    setDungeonImportError('');
+    setIsDungeonImportOpen(true);
+    try {
+      const response = await fetch('/api/dungeons');
+      if (!response.ok) throw new Error('Unable to load dungeon library.');
+      const data = await response.json();
+      setDungeonLibrary(data.dungeons || []);
+    } catch (error) {
+      setDungeonImportError(error.message || 'Unable to load dungeon library.');
+    }
+  };
+
+  const importDungeonAsBoard = async (dungeonSummary) => {
+    try {
+      const response = await fetch(`/api/dungeons/${encodeURIComponent(dungeonSummary.id)}`);
+      if (!response.ok) throw new Error('Unable to load dungeon.');
+      const data = await response.json();
+      const nextBoard = dungeonToBoard(normalizeDungeon(data.dungeon));
+      setState((current) => ({
+        ...current,
+        boards: [...current.boards, nextBoard],
+        activeBoardId: nextBoard.id,
+      }));
+      setIsDungeonImportOpen(false);
+      setActiveSidebarTab('map');
+    } catch (error) {
+      setDungeonImportError(error.message || 'Unable to import dungeon.');
+    }
   };
 
   const duplicateBoard = () => {
@@ -640,6 +675,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
         <Panel title="Project" icon={<Layers size={16} />}>
           <button className="command" title="Return to the project home screen" onClick={leaveProject}><Layers size={16} /> Project home</button>
+          <button className="command accent" title="Open the standalone dungeon builder" onClick={onOpenDungeonBuilder}><Grid2X2 size={16} /> Launch Dungeon Builder</button>
         </Panel>
 
         <Panel title="Asset Manager" icon={<Upload size={16} />}>
@@ -705,6 +741,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <button className="command" title="Duplicate the active board" onClick={duplicateBoard}><Copy size={16} /> Duplicate</button>
           </div>
           <button className="command accent" title="Publish the active board to the player viewer" onClick={showBoardToPlayers}><Send size={16} /> Show active board to players</button>
+          <button className="command" title="Import a reusable dungeon map as a new board" onClick={openDungeonImport}><Library size={16} /> Import Dungeon Map</button>
         </Panel>
 
         <Panel title="Dice" icon={<Grid2X2 size={16} />}>
@@ -1235,6 +1272,36 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                   <span>Save a selected board token or search the 5e.tools bestiary to start building this project library.</span>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isDungeonImportOpen && (
+        <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Import dungeon map">
+          <div className="library-modal dungeon-import-modal">
+            <div className="library-modal-header">
+              <div>
+                <strong>Import Dungeon Map</strong>
+                <span>Select a global dungeon to instantiate as a campaign board with lighting walls and terrain metadata.</span>
+              </div>
+              <button onClick={() => setIsDungeonImportOpen(false)} aria-label="Close dungeon import"><X size={18} /></button>
+            </div>
+            {dungeonImportError && <p className="form-error">{dungeonImportError}</p>}
+            <div className="dungeon-import-grid">
+              {dungeonLibrary.map((dungeon) => (
+                <article className="dungeon-card" key={dungeon.id}>
+                  <div className="dungeon-thumb">
+                    {dungeon.thumbnailUrl ? <img src={`${dungeon.thumbnailUrl}?v=${encodeURIComponent(dungeon.updatedAt || '')}`} alt="" /> : <Grid2X2 size={30} />}
+                  </div>
+                  <div className="dungeon-card-body">
+                    <strong>{dungeon.name}</strong>
+                    <span>{dungeon.gridSize?.width || 0} x {dungeon.gridSize?.height || 0}</span>
+                  </div>
+                  <button className="command accent" onClick={() => importDungeonAsBoard(dungeon)}>Import</button>
+                </article>
+              ))}
+              {!dungeonLibrary.length && <div className="library-empty"><strong>No dungeons found</strong><span>Create one from the Dungeon Builder first.</span></div>}
             </div>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { DungeonBuilder } from './components/DungeonBuilder';
 import { DungeonMasterPortal } from './components/DungeonMasterPortal';
 import { PlayerViewer } from './components/PlayerViewer';
 import { useSyncedBoard } from './hooks/useSyncedBoard';
@@ -25,6 +26,7 @@ export function App() {
     canRedo,
   } = useSyncedBoard();
   const [mode, setMode] = useState(() => new URLSearchParams(window.location.search).get('view') === 'player' ? 'player' : 'dm');
+  const [workspace, setWorkspace] = useState('tableforge');
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -35,7 +37,9 @@ export function App() {
 
   return (
     <main className={`app app-${mode}`}>
-      {mode === 'dm' && !state ? (
+      {workspace === 'dungeon' ? (
+        <DungeonBuilder onBack={() => setWorkspace('tableforge')} />
+      ) : mode === 'dm' && !state ? (
         <ProjectLauncher
           projects={projects}
           isLoading={isLoading}
@@ -45,6 +49,7 @@ export function App() {
           onRenameProject={renameProject}
           onDeleteProject={deleteProject}
           onImportProject={importProject}
+          onOpenDungeonBuilder={() => setWorkspace('dungeon')}
         />
       ) : mode === 'dm' ? (
         <DungeonMasterPortal
@@ -60,6 +65,7 @@ export function App() {
           redo={redo}
           canUndo={canUndo}
           canRedo={canRedo}
+          onOpenDungeonBuilder={() => setWorkspace('dungeon')}
         />
       ) : (
         <PlayerViewer state={playerState} />
@@ -68,7 +74,7 @@ export function App() {
   );
 }
 
-function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenProject, onRenameProject, onDeleteProject, onImportProject }) {
+function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenProject, onRenameProject, onDeleteProject, onImportProject, onOpenDungeonBuilder }) {
   const [name, setName] = useState('New Campaign');
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
@@ -111,6 +117,7 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
             <strong>Open a project</strong>
             <span>Projects are saved on this host machine and shared with connected players.</span>
           </div>
+          <button className="project-builder-button" onClick={onOpenDungeonBuilder}>Dungeon & Map Builder</button>
           <label className="project-import-button">
             Import Campaign
             <input type="file" accept=".zip,application/zip" onChange={handleImportChange} disabled={isImporting} />

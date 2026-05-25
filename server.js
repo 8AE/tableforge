@@ -1,21 +1,21 @@
 import express from 'express';
 import fs from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { ZipArchive } from 'archiver';
 import multer from 'multer';
+import unzipper from 'unzipper';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
-const { ZipArchive } = require('archiver');
-const unzipper = require('unzipper');
 const app = express();
 const port = Number(process.env.PORT || 5173);
 const host = process.env.HOST || '0.0.0.0';
 const dataDir = process.env.TABLEFORGE_DATA_DIR || path.join(__dirname, 'data');
+const dungeonsDir = path.join(dataDir, 'dungeons');
+const dungeonManifestFile = path.join(dungeonsDir, 'manifest.json');
 const legacyDataFile = path.join(dataDir, 'projects.json');
 const openProjectFile = path.join(dataDir, 'open-project.json');
 const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp']);
@@ -73,8 +73,24 @@ function projectAssetDir(projectId, bucket) {
   return path.join(projectDir(projectId), 'assets', bucket);
 }
 
+function dungeonDir(dungeonId) {
+  return path.join(dungeonsDir, dungeonId);
+}
+
+function dungeonFile(dungeonId) {
+  return path.join(dungeonDir(dungeonId), 'dungeon.json');
+}
+
+function dungeonThumbnailFile(dungeonId) {
+  return path.join(dungeonDir(dungeonId), 'thumbnail.png');
+}
+
 function isProjectId(value) {
   return typeof value === 'string' && /^[a-zA-Z0-9_.-]+$/.test(value) && !value.includes('..');
+}
+
+function isDungeonId(value) {
+  return isProjectId(value);
 }
 
 function sanitizeFilename(value) {
@@ -94,6 +110,10 @@ function sanitizeArchiveName(value) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 80) || 'project';
   return `${basename}.zip`;
+}
+
+function sanitizeDungeonArchiveName(value) {
+  return sanitizeArchiveName(value).replace(/\.zip$/i, '.tfd');
 }
 
 function getAssetBucket(file, requestedType = '') {
@@ -209,6 +229,76 @@ async function readProjects() {
   };
 }
 
+async function readDungeonManifest() {
+  await fs.mkdir(dungeonsDir, { recursive: true });
+  const manifest = await readJson(dungeonManifestFile, { dungeons: [] });
+  return {
+    dungeons: Array.isArray(manifest.dungeons) ? manifest.dungeons : [],
+  };
+}
+
+async function writeDungeonManifest(dungeons) {
+  await writeJsonAtomic(dungeonManifestFile, { dungeons });
+}
+
+function dungeonSummary(dungeon) {
+  return {
+    id: dungeon.id,
+    name: dungeon.name,
+    gridSize: dungeon.gridSize,
+    updatedAt: dungeon.updatedAt || new Date().toISOString(),
+    thumbnailUrl: `/api/dungeons/${encodeURIComponent(dungeon.id)}/thumbnail`,
+  };
+}
+
+async function readDungeon(dungeonId) {
+  if (!isDungeonId(dungeonId)) return null;
+  return readJson(dungeonFile(dungeonId), null);
+}
+
+async function writeDungeon(dungeon, thumbnailDataUrl = '') {
+  if (!isDungeonId(dungeon.id)) throw new Error('Invalid dungeon id.');
+  const nextDungeon = {
+    ...dungeon,
+    updatedAt: new Date().toISOString(),
+  };
+  await fs.mkdir(dungeonDir(nextDungeon.id), { recursive: true });
+  await writeJsonAtomic(dungeonFile(nextDungeon.id), nextDungeon);
+  if (thumbnailDataUrl) {
+    await writeDungeonThumbnail(nextDungeon.id, thumbnailDataUrl);
+  }
+  const manifest = await readDungeonManifest();
+  const summary = dungeonSummary(nextDungeon);
+  const dungeons = [
+    summary,
+    ...manifest.dungeons.filter((item) => item.id !== nextDungeon.id),
+  ].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  await writeDungeonManifest(dungeons);
+  return nextDungeon;
+}
+
+async function writeDungeonThumbnail(dungeonId, dataUrl) {
+  const match = String(dataUrl).match(/^data:image\/png;base64,([a-zA-Z0-9+/=]+)$/);
+  if (!match) return;
+  await fs.writeFile(dungeonThumbnailFile(dungeonId), Buffer.from(match[1], 'base64'));
+}
+
+function validateDungeonSchema(dungeon) {
+  return Boolean(
+    dungeon
+    && typeof dungeon === 'object'
+    && isDungeonId(dungeon.id)
+    && typeof dungeon.name === 'string'
+    && dungeon.name.trim()
+    && dungeon.gridSize
+    && Number(dungeon.gridSize.width) >= 5
+    && Number(dungeon.gridSize.height) >= 5
+    && Array.isArray(dungeon.tiles)
+    && Array.isArray(dungeon.terrain)
+    && Array.isArray(dungeon.lightingGeometry)
+  );
+}
+
 async function projectExists(projectId) {
   return isProjectId(projectId) && await pathExists(projectFile(projectId));
 }
@@ -267,6 +357,17 @@ function validateArchiveShape(entry, normalized) {
   throw new Error(`Unexpected file in archive: ${entry.path}`);
 }
 
+function validateDungeonArchiveShape(entry, normalized) {
+  const isDirectory = entry.type === 'Directory';
+  const withoutTrailingSlash = normalized.replace(/\/$/, '');
+  if (isDirectory) {
+    if (withoutTrailingSlash === '') return;
+    throw new Error(`Unexpected directory in dungeon archive: ${entry.path}`);
+  }
+  if (normalized === 'dungeon.json' || normalized === 'thumbnail.png') return;
+  throw new Error(`Unexpected file in dungeon archive: ${entry.path}`);
+}
+
 async function inspectProjectArchive(zipFile) {
   const archive = await unzipper.Open.file(zipFile);
   const projectEntry = archive.files.find((entry) => entry.path === 'project.json' && entry.type !== 'Directory');
@@ -296,6 +397,35 @@ async function inspectProjectArchive(zipFile) {
   return { project, archive };
 }
 
+async function inspectDungeonArchive(zipFile) {
+  const archive = await unzipper.Open.file(zipFile);
+  const dungeonEntry = archive.files.find((entry) => entry.path === 'dungeon.json' && entry.type !== 'Directory');
+  if (!dungeonEntry) {
+    const error = new Error('Archive must contain a root-level dungeon.json file.');
+    error.status = 400;
+    throw error;
+  }
+  let dungeon;
+  try {
+    dungeon = JSON.parse((await dungeonEntry.buffer()).toString('utf8'));
+  } catch {
+    const error = new Error('dungeon.json is not valid JSON.');
+    error.status = 400;
+    throw error;
+  }
+  if (!validateDungeonSchema(dungeon)) {
+    const error = new Error('dungeon.json does not match the dungeon schema.');
+    error.status = 400;
+    throw error;
+  }
+  const targetDirectory = dungeonDir(dungeon.id);
+  for (const entry of archive.files) {
+    const { normalized } = validateArchiveEntryPath(entry.path, targetDirectory);
+    validateDungeonArchiveShape(entry, normalized);
+  }
+  return { dungeon, archive };
+}
+
 async function extractProjectArchive(archive, targetDirectory) {
   const stagingDirectory = path.join(dataDir, `.import-${Date.now()}-${randomUUID()}`);
   try {
@@ -303,6 +433,34 @@ async function extractProjectArchive(archive, targetDirectory) {
     for (const entry of archive.files) {
       const { normalized, targetFile } = validateArchiveEntryPath(entry.path, stagingDirectory);
       validateArchiveShape(entry, normalized);
+      if (entry.type === 'Directory') {
+        await fs.mkdir(targetFile, { recursive: true });
+        continue;
+      }
+      await fs.mkdir(path.dirname(targetFile), { recursive: true });
+      await new Promise((resolve, reject) => {
+        entry
+          .stream()
+          .pipe(createWriteStream(targetFile))
+          .on('finish', resolve)
+          .on('error', reject);
+      });
+    }
+    await fs.rm(targetDirectory, { recursive: true, force: true });
+    await fs.rename(stagingDirectory, targetDirectory);
+  } catch (error) {
+    await fs.rm(stagingDirectory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function extractDungeonArchive(archive, targetDirectory) {
+  const stagingDirectory = path.join(dungeonsDir, `.import-${Date.now()}-${randomUUID()}`);
+  try {
+    await fs.mkdir(stagingDirectory, { recursive: true });
+    for (const entry of archive.files) {
+      const { normalized, targetFile } = validateArchiveEntryPath(entry.path, stagingDirectory);
+      validateDungeonArchiveShape(entry, normalized);
       if (entry.type === 'Directory') {
         await fs.mkdir(targetFile, { recursive: true });
         continue;
@@ -519,6 +677,100 @@ app.get('/api/projects/:projectId/assets/:bucket/:filename', async (request, res
     return;
   }
   response.sendFile(path.join(projectAssetDir(projectId, bucket), filename));
+});
+
+app.get('/api/dungeons', async (_request, response) => {
+  const manifest = await readDungeonManifest();
+  response.json({ dungeons: manifest.dungeons });
+});
+
+app.get('/api/dungeons/:id', async (request, response) => {
+  const dungeon = await readDungeon(request.params.id);
+  if (!dungeon) {
+    response.status(404).json({ error: 'Dungeon not found.' });
+    return;
+  }
+  response.json({ dungeon });
+});
+
+app.put('/api/dungeons/:id', async (request, response) => {
+  const dungeon = { ...request.body.dungeon, id: request.params.id };
+  if (!validateDungeonSchema(dungeon)) {
+    response.status(400).json({ error: 'Invalid dungeon schema.' });
+    return;
+  }
+  const savedDungeon = await writeDungeon(dungeon, request.body.thumbnailDataUrl);
+  response.json({ dungeon: savedDungeon });
+});
+
+app.delete('/api/dungeons/:id', async (request, response) => {
+  if (!isDungeonId(request.params.id)) {
+    response.status(400).json({ error: 'Invalid dungeon id.' });
+    return;
+  }
+  await fs.rm(dungeonDir(request.params.id), { recursive: true, force: true });
+  const manifest = await readDungeonManifest();
+  const dungeons = manifest.dungeons.filter((dungeon) => dungeon.id !== request.params.id);
+  await writeDungeonManifest(dungeons);
+  response.json({ dungeons });
+});
+
+app.get('/api/dungeons/:id/thumbnail', async (request, response) => {
+  if (!isDungeonId(request.params.id)) {
+    response.status(400).json({ error: 'Invalid dungeon id.' });
+    return;
+  }
+  response.sendFile(dungeonThumbnailFile(request.params.id), (error) => {
+    if (error && !response.headersSent) response.status(404).json({ error: 'Thumbnail not found.' });
+  });
+});
+
+app.get('/api/dungeons/:id/export', async (request, response, next) => {
+  try {
+    const dungeon = await readDungeon(request.params.id);
+    if (!dungeon) {
+      response.status(404).json({ error: 'Dungeon not found.' });
+      return;
+    }
+
+    response.setHeader('Content-Type', 'application/zip');
+    response.setHeader('Content-Disposition', `attachment; filename="${sanitizeDungeonArchiveName(dungeon.name)}"`);
+
+    const archive = new ZipArchive({ zlib: { level: 9 } });
+    archive.on('error', next);
+    archive.pipe(response);
+    archive.directory(dungeonDir(dungeon.id), false);
+    await archive.finalize();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/dungeons/import', importUpload.single('file'), async (request, response) => {
+  const uploadedFile = request.file?.path;
+  const uploadedDir = uploadedFile ? path.dirname(uploadedFile) : null;
+  try {
+    if (!uploadedFile) {
+      response.status(400).json({ error: 'No archive uploaded.' });
+      return;
+    }
+    const extension = path.extname(request.file.originalname || '').toLowerCase();
+    if (!['.zip', '.tfd'].includes(extension)) {
+      response.status(400).json({ error: 'Import file must be a .zip or .tfd archive.' });
+      return;
+    }
+
+    await fs.mkdir(dungeonsDir, { recursive: true });
+    const { dungeon, archive } = await inspectDungeonArchive(uploadedFile);
+    await extractDungeonArchive(archive, dungeonDir(dungeon.id));
+    const savedDungeon = await writeDungeon(dungeon);
+    const manifest = await readDungeonManifest();
+    response.status(201).json({ dungeons: manifest.dungeons, importedDungeonId: savedDungeon.id });
+  } catch (error) {
+    response.status(error.status || 400).json({ error: error.message || 'Unable to import dungeon archive.' });
+  } finally {
+    if (uploadedDir) await fs.rm(uploadedDir, { recursive: true, force: true }).catch(() => {});
+  }
 });
 
 app.get('/api/5etools', async (request, response) => {
