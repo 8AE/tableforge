@@ -31,7 +31,7 @@ import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
 import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
-import { boxesOverlap, defaultLighting, getBoard, loadImage, makeBoard, normalizeLibraryToken, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
+import { boxesOverlap, defaultLighting, getBoard, makeBoard, normalizeLibraryToken, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
 
 export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, undo, redo, canUndo, canRedo }) {
   const [tool, setTool] = useState('select');
@@ -131,6 +131,25 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     fetchProjectAssets();
   }, [openProjectId]);
 
+  const uploadProjectAsset = async (file, category = assetCategory) => {
+    if (!openProjectId || !file) return null;
+    const form = new FormData();
+    form.append('file', file);
+    form.append('category', category);
+    form.append('assetType', file.type.startsWith('audio/') ? 'audio' : 'image');
+    const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Unable to upload ${file.name}.`);
+    }
+    const data = await response.json();
+    setAssets(data.assets || []);
+    return data.asset;
+  };
+
   const uploadProjectAssets = async (files) => {
     const fileList = Array.from(files || []);
     if (!openProjectId || !fileList.length) return;
@@ -138,22 +157,26 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     setIsUploadingAsset(true);
     try {
       for (const file of fileList) {
-        const form = new FormData();
-        form.append('file', file);
-        form.append('category', assetCategory);
-        form.append('assetType', file.type.startsWith('audio/') ? 'audio' : 'image');
-        const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets`, {
-          method: 'POST',
-          body: form,
-        });
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          throw new Error(body.error || `Unable to upload ${file.name}.`);
-        }
+        await uploadProjectAsset(file, assetCategory);
       }
-      await fetchProjectAssets();
     } catch (error) {
       setAssetError(error.message || 'Unable to upload asset.');
+    } finally {
+      setIsUploadingAsset(false);
+    }
+  };
+
+  const uploadImageForUse = async (event, category, onAssetReady) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setAssetError('');
+    setIsUploadingAsset(true);
+    try {
+      const asset = await uploadProjectAsset(file, category);
+      if (asset) onAssetReady(asset);
+    } catch (error) {
+      setAssetError(error.message || 'Unable to upload image asset.');
     } finally {
       setIsUploadingAsset(false);
     }
@@ -721,8 +744,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         <Panel title="Background Layer" icon={<Image size={16} />}>
           <label className="file-button">
             <Image size={16} />
-            Background image
-            <input type="file" accept="image/*" onChange={(event) => loadImage(event, (src) => updateBackground({ src }))} />
+            {isUploadingAsset ? 'Uploading image...' : 'Background image'}
+            <input type="file" accept="image/*" onChange={(event) => uploadImageForUse(event, 'map', useAssetAsMap)} />
           </label>
           {imageAssets.length > 0 && (
             <details className="asset-picker">
@@ -904,8 +927,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             </div>
             <label className="file-button">
               <Image size={16} />
-              Token image
-              <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateToken(selectedToken.id, { image }))} />
+              {isUploadingAsset ? 'Uploading image...' : 'Token image'}
+              <input type="file" accept="image/*" onChange={(event) => uploadImageForUse(event, 'token', (asset) => updateToken(selectedToken.id, { image: asset.path }))} />
             </label>
             {imageAssets.length > 0 && (
               <details className="asset-picker">
@@ -1160,8 +1183,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                         </div>
                         <label className="file-button">
                           <Image size={16} />
-                          Token image
-                          <input type="file" accept="image/*" onChange={(event) => loadImage(event, (image) => updateLibraryToken(libraryToken.id, { image }))} />
+                          {isUploadingAsset ? 'Uploading image...' : 'Token image'}
+                          <input type="file" accept="image/*" onChange={(event) => uploadImageForUse(event, 'token', (asset) => updateLibraryToken(libraryToken.id, { image: asset.path }))} />
                         </label>
                         {imageAssets.length > 0 && (
                           <details className="asset-picker">

@@ -379,11 +379,3 @@ export function offsetDrawing(drawing, dx, dy) {
     end: { x: drawing.end.x + dx, y: drawing.end.y + dy },
   };
 }
-
-export function loadImage(event, onLoad) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => onLoad(reader.result);
-  reader.readAsDataURL(file);
-}
