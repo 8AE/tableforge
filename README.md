@@ -102,6 +102,95 @@ npm run preview
 - Lucide React icons
 - Express for the local host API and project storage
 - Browser `BroadcastChannel` for local tab sync
+- Electron and electron-builder for the desktop wrapper and native packages
+
+## Desktop Application Developer Guide
+
+Tableforge includes an Electron desktop wrapper in `desktop/`. The wrapper launches the existing Express server as a background process, waits for `GET /api/health`, and then loads the local app from `http://127.0.0.1:<dynamic-port>`.
+
+### Prerequisites
+
+- Node.js v18 or v20.
+- npm dependencies installed with `npm install`.
+- Linux packaging: `build-essential`, `fakeroot`, and `dpkg` packages are recommended for local `.deb` builds.
+- macOS packaging: Xcode Command Line Tools are required. Install them with `xcode-select --install`.
+- Windows packaging: run from Windows for the most reliable NSIS and Authenticode signing flow.
+
+### Local Development
+
+Build the web client once before starting Electron:
+
+```bash
+npm run build
+npm run desktop:start
+```
+
+The Electron app chooses a free port starting at `3000`, passes it to `server.js` as `PORT`, and stores desktop data in the current user's OS application data directory. To request a different first port:
+
+```bash
+TABLEFORGE_DESKTOP_PORT=3100 npm run desktop:start
+```
+
+Chrome Developer Tools are available from the **View** menu, `Ctrl+Shift+I` on Windows/Linux, or `Cmd+Option+I` on macOS.
+
+### Packaging
+
+Build the web client before packaging:
+
+```bash
+npm run build
+```
+
+Create an unpacked desktop build for inspection:
+
+```bash
+npm run desktop:build
+```
+
+Build native installers for the current target family:
+
+```bash
+npm run desktop:dist-win
+npm run desktop:dist-mac
+npm run desktop:dist-linux
+```
+
+Build all configured x64 targets:
+
+```bash
+npm run desktop:dist-all
+```
+
+Configured outputs are Windows NSIS and portable `.exe` packages for x64/arm64, macOS DMG and ZIP universal packages, and Linux AppImage plus `.deb` packages for x64. Production icons should be placed in `desktop/assets/` before release packaging.
+
+### Code Signing
+
+macOS signing and notarization support is configured in `electron-builder.yml`. Set these environment variables when building signed macOS releases:
+
+```bash
+CSC_LINK=/path/to/developer-id.p12
+CSC_KEY_PASSWORD=certificate-password
+APPLE_ID=apple-id@example.com
+APPLE_APP_SPECIFIC_PASSWORD=app-specific-password
+APPLE_TEAM_ID=TEAMID1234
+```
+
+Windows Authenticode signing can use electron-builder's standard certificate variables:
+
+```bash
+CSC_LINK=/path/to/windows-cert.pfx
+CSC_KEY_PASSWORD=certificate-password
+```
+
+### Data Portability
+
+Browser/server mode stores projects in the repository `data/` directory. Desktop mode stores projects and uploaded assets in the OS application data directory:
+
+- Windows: `%APPDATA%/Tableforge/data`
+- macOS: `~/Library/Application Support/Tableforge/data`
+- Linux: `~/.config/Tableforge/data`
+
+Copy this `data` directory to move projects between desktop installs. Each project is stored as a folder containing `project.json` and its uploaded image/audio assets.
 
 ## Future Backend Ideas
 

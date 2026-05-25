@@ -8,7 +8,8 @@ import multer from 'multer';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = Number(process.env.PORT || 5173);
-const dataDir = path.join(__dirname, 'data');
+const host = process.env.HOST || '0.0.0.0';
+const dataDir = process.env.TABLEFORGE_DATA_DIR || path.join(__dirname, 'data');
 const legacyDataFile = path.join(dataDir, 'projects.json');
 const openProjectFile = path.join(dataDir, 'open-project.json');
 const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp']);
@@ -19,6 +20,24 @@ const upload = multer({
 });
 
 app.use(express.json({ limit: '50mb' }));
+app.use((_request, response, next) => {
+  response.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "media-src 'self' blob:",
+      "font-src 'self' data:",
+      "connect-src 'self' http: https: ws: wss:",
+    ].join('; '),
+  );
+  next();
+});
 
 function projectDir(projectId) {
   return path.join(dataDir, projectId);
@@ -162,6 +181,14 @@ async function readProjects() {
 async function projectExists(projectId) {
   return isProjectId(projectId) && await pathExists(projectFile(projectId));
 }
+
+app.get('/api/health', (_request, response) => {
+  response.json({
+    ok: true,
+    app: 'tableforge',
+    dataDir,
+  });
+});
 
 app.get('/api/projects', async (_request, response) => {
   response.json(await readProjects());
@@ -312,6 +339,9 @@ app.use((_request, response) => {
   response.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Tableforge host running on http://0.0.0.0:${port}`);
+app.listen(port, host, () => {
+  console.log(`Tableforge host running on http://${host}:${port}`);
+  if (process.send) {
+    process.send({ type: 'ready', port, host, dataDir });
+  }
 });

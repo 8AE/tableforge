@@ -1,0 +1,56 @@
+appId: com.tableforge.desktop
+productName: Tableforge
+directories:
+  output: release
+files:
+  - desktop/**/*
+  - dist/**/*
+  - server.js
+  - package.json
+  - node_modules/**/*
+asar: true
+extraMetadata:
+  main: desktop/main.js
+win:
+  icon: desktop/assets/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: portable
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+mac:
+  icon: desktop/assets/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - universal
+    - target: zip
+      arch:
+        - universal
+  category: public.app-category.games
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+afterSign: build/notarize.cjs
+linux:
+  icon: desktop/assets/icon.png
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  category: Game
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
