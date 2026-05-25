@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Brush,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Clipboard,
   Copy,
@@ -12,11 +13,13 @@ import {
   Image,
   Library,
   Layers,
+  Lightbulb,
   MousePointer2,
   Music,
   Pencil,
   Plus,
   Redo2,
+  Ruler,
   Send,
   Trash2,
   Undo2,
@@ -41,6 +44,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [clipboard, setClipboard] = useState(null);
   const [tokensExpanded, setTokensExpanded] = useState(true);
   const [drawingsExpanded, setDrawingsExpanded] = useState(true);
+  const [activeSidebarTab, setActiveSidebarTab] = useState('campaign');
+  const [isQuickMenuCollapsed, setIsQuickMenuCollapsed] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [editingLibraryTokenId, setEditingLibraryTokenId] = useState(null);
   const [bestiaryQuery, setBestiaryQuery] = useState('');
@@ -58,6 +63,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const board = getBoard(state, state.activeBoardId);
   const tokenLibrary = state.tokenLibrary || [];
   const imageAssets = assets.filter((asset) => asset.type === 'image');
+  const audioAssets = assets.filter((asset) => asset.type === 'audio');
 
   const updateBoard = (patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, ...patch })));
@@ -466,6 +472,19 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const selectedDrawing = selected?.type === 'drawing' ? board.drawings.find((drawing) => drawing.id === selected.id) : null;
   const selectedToken = selected?.type === 'token' ? board.tokens.find((token) => token.id === selected.id) : null;
   const selectedWall = selected?.type === 'wall' ? board.lighting?.walls?.find((wall) => wall.id === selected.id) : null;
+  const sidebarTabs = [
+    ['campaign', 'Campaign'],
+    ['map', 'Map'],
+    ['entities', 'Entities'],
+    ['soundboard', 'Soundboard'],
+    ['settings', 'Settings'],
+  ];
+  const quickMapTools = [
+    ['select', <MousePointer2 size={17} />, 'Move Tokens'],
+    ['ruler', <Ruler size={17} />, 'Measuring Tool'],
+    ['draw', <Brush size={17} />, 'Drawing Tool'],
+    ['light', <Lightbulb size={17} />, 'Lighting & Vision'],
+  ];
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -516,6 +535,60 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   return (
     <>
+      <section className="workspace">
+        <Topbar board={board} mode="dm" />
+        <div className="map-viewport">
+          <div className={`quick-map-menu ${isQuickMenuCollapsed ? 'collapsed' : ''}`}>
+            <div className="quick-menu-tools" aria-label="Map quick access tools">
+              {quickMapTools.map(([id, icon, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  title={label}
+                  aria-label={label}
+                  className={tool === id ? 'active' : ''}
+                  onClick={() => setTool(id)}
+                >
+                  {icon}
+                  <span>{label.replace(' Tool', '')}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              className="quick-menu-toggle"
+              type="button"
+              title={isQuickMenuCollapsed ? 'Show map tools' : 'Hide map tools'}
+              aria-label={isQuickMenuCollapsed ? 'Show map tools' : 'Hide map tools'}
+              onClick={() => setIsQuickMenuCollapsed((collapsed) => !collapsed)}
+            >
+              {isQuickMenuCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+            </button>
+          </div>
+          <BoardCanvas
+            board={board}
+            view="dm"
+            tool={tool}
+            selected={selected}
+            setSelected={setSelected}
+            activeLayer={activeLayer}
+            drawLayer={drawLayer}
+            drawColor={drawColor}
+            onAddToken={addToken}
+            onMoveToken={(id, point) => updateToken(id, point)}
+            onMoveDrawing={(id, dx, dy) => updateDrawing(id, offsetDrawing(board.drawings.find((drawing) => drawing.id === id), dx, dy))}
+            onAddDrawing={addDrawing}
+            onMoveBackground={(patch) => updateBackground(patch)}
+            onAddLightReveal={addLightReveal}
+            onAddLightWall={addLightWall}
+            onMoveLightWall={moveLightWall}
+            onRemoveLightReveal={removeLightReveal}
+            onLiveMeasurement={updateLiveMeasurement}
+            onDeleteSelection={deleteSelection}
+            onDuplicateSelection={duplicateSelection}
+          />
+        </div>
+      </section>
+
       <aside className="sidebar">
         <div className="brand">
           <Grid2X2 size={22} />
@@ -524,6 +597,23 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <span>Dungeon master portal</span>
           </div>
         </div>
+
+        <nav className="sidebar-tabs" aria-label="Dungeon master controls">
+          {sidebarTabs.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={activeSidebarTab === id ? 'active' : ''}
+              onClick={() => setActiveSidebarTab(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-body">
+          {activeSidebarTab === 'campaign' && (
+            <div className="sidebar-tab-panel">
 
         <Panel title="Project" icon={<Layers size={16} />}>
           <button className="command" title="Return to the project home screen" onClick={leaveProject}><Layers size={16} /> Project home</button>
@@ -594,23 +684,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           <button className="command accent" title="Publish the active board to the player viewer" onClick={showBoardToPlayers}><Send size={16} /> Show active board to players</button>
         </Panel>
 
-        <Panel title="Lighting" icon={<EyeOff size={16} />}>
-          <label className="check-row" title="Darken the player board and reveal only lit areas">
-            <input type="checkbox" checked={Boolean(board.lighting?.enabled)} onChange={(event) => updateLighting({ enabled: event.target.checked })} />
-            Enable board lighting
-          </label>
-          <label title="How dark unrevealed player areas should be">
-            Darkness
-            <input type="range" min="0.35" max="0.98" step="0.01" value={board.lighting?.darkness ?? 0.86} onChange={(event) => updateLighting({ darkness: Number(event.target.value) })} />
-          </label>
-          <label className="check-row" title="When disabled, wall endpoints can be placed anywhere on the map">
-            <input type="checkbox" checked={board.lighting?.snapWallsToGrid !== false} onChange={(event) => updateLighting({ snapWallsToGrid: event.target.checked })} />
-            Snap lighting walls to grid
-          </label>
-          <button className="command" title="Remove all manually revealed lighting areas" onClick={clearLightReveals}><Eraser size={16} /> Clear reveal areas</button>
-          <button className="command" title="Remove all lighting walls from this board" onClick={clearLightWalls}><Eraser size={16} /> Clear light walls</button>
-        </Panel>
-
         <Panel title="Dice" icon={<Grid2X2 size={16} />}>
           <label>
             Dice notation
@@ -618,6 +691,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           </label>
           <button className="command accent" title="Roll dice on the player viewer" onClick={() => rollDice(diceNotation.trim())}>Roll dice</button>
         </Panel>
+            </div>
+          )}
+
+          {activeSidebarTab === 'map' && (
+            <div className="sidebar-tab-panel">
 
         <Panel title="Board" icon={<Image size={16} />}>
           <label>
@@ -725,6 +803,23 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           </div>
         </Panel>
 
+        <Panel title="Lighting" icon={<EyeOff size={16} />}>
+          <label className="check-row" title="Darken the player board and reveal only lit areas">
+            <input type="checkbox" checked={Boolean(board.lighting?.enabled)} onChange={(event) => updateLighting({ enabled: event.target.checked })} />
+            Enable board lighting
+          </label>
+          <label title="How dark unrevealed player areas should be">
+            Darkness
+            <input type="range" min="0.35" max="0.98" step="0.01" value={board.lighting?.darkness ?? 0.86} onChange={(event) => updateLighting({ darkness: Number(event.target.value) })} />
+          </label>
+          <label className="check-row" title="When disabled, wall endpoints can be placed anywhere on the map">
+            <input type="checkbox" checked={board.lighting?.snapWallsToGrid !== false} onChange={(event) => updateLighting({ snapWallsToGrid: event.target.checked })} />
+            Snap lighting walls to grid
+          </label>
+          <button className="command" title="Remove all manually revealed lighting areas" onClick={clearLightReveals}><Eraser size={16} /> Clear reveal areas</button>
+          <button className="command" title="Remove all lighting walls from this board" onClick={clearLightWalls}><Eraser size={16} /> Clear light walls</button>
+        </Panel>
+
         {selectedWall && (
           <Panel title="Selected Wall" icon={<EyeOff size={16} />}>
             <div className="shortcut-row">
@@ -733,6 +828,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             </div>
           </Panel>
         )}
+            </div>
+          )}
+
+          {activeSidebarTab === 'settings' && (
+            <div className="sidebar-tab-panel">
 
         <Panel title="Shortcuts" icon={<Clipboard size={16} />}>
           <div className="shortcut-row">
@@ -744,6 +844,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <button className="command" title="Redo the last undone board edit" onClick={redo} disabled={!canRedo}><Redo2 size={16} /> Redo</button>
           </div>
         </Panel>
+            </div>
+          )}
+
+          {activeSidebarTab === 'entities' && (
+            <div className="sidebar-tab-panel">
 
         <Panel title="Token" icon={<Plus size={16} />}>
           <label>
@@ -948,6 +1053,28 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             </div>
           )}
         </Panel>
+            </div>
+          )}
+
+          {activeSidebarTab === 'soundboard' && (
+            <div className="sidebar-tab-panel">
+              <Panel title="Soundboard" icon={<Music size={16} />}>
+                {audioAssets.length > 0 ? (
+                  <div className="soundboard-list">
+                    {audioAssets.map((asset) => (
+                      <div className="soundboard-track" key={asset.id}>
+                        <strong title={asset.name}>{asset.name}</strong>
+                        <audio controls src={asset.path} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="empty-note">Upload audio assets from the Campaign tab to build the soundboard.</p>
+                )}
+              </Panel>
+            </div>
+          )}
+        </div>
       </aside>
 
       {isLibraryOpen && (
@@ -1090,31 +1217,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         </div>
       )}
 
-      <section className="workspace">
-        <Topbar board={board} mode="dm" />
-        <BoardCanvas
-          board={board}
-          view="dm"
-          tool={tool}
-          selected={selected}
-          setSelected={setSelected}
-          activeLayer={activeLayer}
-          drawLayer={drawLayer}
-          drawColor={drawColor}
-          onAddToken={addToken}
-          onMoveToken={(id, point) => updateToken(id, point)}
-          onMoveDrawing={(id, dx, dy) => updateDrawing(id, offsetDrawing(board.drawings.find((drawing) => drawing.id === id), dx, dy))}
-          onAddDrawing={addDrawing}
-          onMoveBackground={(patch) => updateBackground(patch)}
-          onAddLightReveal={addLightReveal}
-          onAddLightWall={addLightWall}
-          onMoveLightWall={moveLightWall}
-          onRemoveLightReveal={removeLightReveal}
-          onLiveMeasurement={updateLiveMeasurement}
-          onDeleteSelection={deleteSelection}
-          onDuplicateSelection={duplicateSelection}
-        />
-      </section>
     </>
   );
 }
