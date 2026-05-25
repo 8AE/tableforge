@@ -17,6 +17,7 @@ export function App() {
     leaveProject,
     renameProject,
     deleteProject,
+    importProject,
     publishProjectToPlayers,
     undo,
     redo,
@@ -43,6 +44,7 @@ export function App() {
           onOpenProject={openProject}
           onRenameProject={renameProject}
           onDeleteProject={deleteProject}
+          onImportProject={importProject}
         />
       ) : mode === 'dm' ? (
         <DungeonMasterPortal
@@ -66,17 +68,57 @@ export function App() {
   );
 }
 
-function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenProject, onRenameProject, onDeleteProject }) {
+function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenProject, onRenameProject, onDeleteProject, onImportProject }) {
   const [name, setName] = useState('New Campaign');
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
+  const [importFile, setImportFile] = useState(null);
+  const [importConflict, setImportConflict] = useState(null);
+  const [importMessage, setImportMessage] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
+  const importSelectedFile = async (file, overwrite = false) => {
+    if (!file) return;
+    setIsImporting(true);
+    setImportMessage('');
+    const result = await onImportProject(file, { overwrite });
+    setIsImporting(false);
+    if (result.ok) {
+      setImportFile(null);
+      setImportConflict(null);
+      setImportMessage('Campaign imported.');
+      return;
+    }
+    if (result.conflict) {
+      setImportFile(file);
+      setImportConflict(result.conflict);
+      return;
+    }
+    setImportMessage(result.error || 'Unable to import campaign.');
+  };
+
+  const handleImportChange = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) importSelectedFile(file, false);
+  };
+
   return (
     <section className="project-launcher">
       <div className="project-card">
-        <strong>Open a project</strong>
-        <span>Projects are saved on this host machine and shared with connected players.</span>
+        <div className="project-card-header">
+          <div>
+            <strong>Open a project</strong>
+            <span>Projects are saved on this host machine and shared with connected players.</span>
+          </div>
+          <label className="project-import-button">
+            Import Campaign
+            <input type="file" accept=".zip,application/zip" onChange={handleImportChange} disabled={isImporting} />
+          </label>
+        </div>
         {isLoading && <p>Loading projects...</p>}
         {error && <p className="form-error">{error}</p>}
+        {importMessage && <p className={importMessage.includes('imported') ? 'form-success' : 'form-error'}>{importMessage}</p>}
         <div className="project-list">
           {projects.map((project) => (
             <div className="project-row" key={project.id}>
@@ -90,6 +132,7 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
               ) : (
                 <button onClick={() => { setEditingId(project.id); setEditingName(project.name); }}>Rename</button>
               )}
+              <a href={`/api/projects/${encodeURIComponent(project.id)}/export`} download={`${project.name}.zip`}>Export</a>
               <button className="danger-text" onClick={() => onDeleteProject(project.id)}>Delete</button>
             </div>
           ))}
@@ -99,6 +142,21 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
           <button onClick={() => onCreateProject(name || 'New Campaign')}>Create project</button>
         </div>
       </div>
+      {importConflict && (
+        <div className="project-conflict-overlay" role="dialog" aria-modal="true" aria-label="Project import conflict">
+          <div className="project-conflict-modal">
+            <strong>Project Already Exists!</strong>
+            <p>
+              A project named {importConflict.name} ({importConflict.id}) already exists. Importing this file will overwrite all existing data,
+              including tokens, maps, and local audio for this campaign.
+            </p>
+            <div className="project-conflict-actions">
+              <button className="danger-text" disabled={isImporting} onClick={() => importSelectedFile(importFile, true)}>Overwrite and Replace</button>
+              <button onClick={() => { setImportConflict(null); setImportFile(null); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

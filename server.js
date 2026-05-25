@@ -1,11 +1,17 @@
 import express from 'express';
 import fs from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const { ZipArchive } = require('archiver');
+const unzipper = require('unzipper');
 const app = express();
 const port = Number(process.env.PORT || 5173);
 const host = process.env.HOST || '0.0.0.0';
@@ -17,6 +23,22 @@ const audioExtensions = new Set(['.mp3', '.wav']);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
+});
+const importUpload = multer({
+  storage: multer.diskStorage({
+    destination: async (_request, _file, callback) => {
+      try {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tableforge-import-upload-'));
+        callback(null, tempDir);
+      } catch (error) {
+        callback(error);
+      }
+    },
+    filename: (_request, file, callback) => {
+      callback(null, `${Date.now()}-${randomUUID()}${path.extname(file.originalname || '.zip')}`);
+    },
+  }),
+  limits: { fileSize: 250 * 1024 * 1024 },
 });
 
 app.use(express.json({ limit: '50mb' }));
@@ -63,6 +85,15 @@ function sanitizeFilename(value) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 80) || 'asset';
   return `${basename}${extension}`;
+}
+
+function sanitizeArchiveName(value) {
+  const basename = String(value || 'project')
+    .normalize('NFKD')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'project';
+  return `${basename}.zip`;
 }
 
 function getAssetBucket(file, requestedType = '') {
@@ -182,6 +213,117 @@ async function projectExists(projectId) {
   return isProjectId(projectId) && await pathExists(projectFile(projectId));
 }
 
+function validateProjectSchema(project) {
+  return Boolean(
+    project
+    && typeof project === 'object'
+    && isProjectId(project.id)
+    && typeof project.name === 'string'
+    && project.name.trim()
+    && project.state
+    && typeof project.state === 'object'
+    && Array.isArray(project.state.boards)
+  );
+}
+
+function validateArchiveEntryPath(entryName, targetDirectory) {
+  if (!entryName || entryName.includes('\0')) {
+    throw new Error('Invalid archive entry.');
+  }
+  const normalizedName = entryName.replace(/\\/g, '/');
+  if (path.posix.isAbsolute(normalizedName)) {
+    throw new Error('Malicious entry detected (Directory Traversal Attack blocked).');
+  }
+  const normalized = path.posix.normalize(normalizedName);
+  if (normalized === '..' || normalized.startsWith('../')) {
+    throw new Error('Malicious entry detected (Directory Traversal Attack blocked).');
+  }
+  const targetFile = path.resolve(targetDirectory, ...normalized.split('/'));
+  const boundary = path.resolve(targetDirectory);
+  if (targetFile !== boundary && !targetFile.startsWith(boundary + path.sep)) {
+    throw new Error('Malicious entry detected (Directory Traversal Attack blocked).');
+  }
+  return { normalized, targetFile };
+}
+
+function validateArchiveShape(entry, normalized) {
+  const isDirectory = entry.type === 'Directory';
+  const withoutTrailingSlash = normalized.replace(/\/$/, '');
+  if (isDirectory) {
+    if (['assets', 'assets/images', 'assets/audio'].includes(withoutTrailingSlash)) return;
+    throw new Error(`Unexpected directory in archive: ${entry.path}`);
+  }
+  if (normalized === 'project.json') return;
+  const imagePrefix = 'assets/images/';
+  const audioPrefix = 'assets/audio/';
+  if (normalized.startsWith(imagePrefix)) {
+    const filename = normalized.slice(imagePrefix.length);
+    if (filename && filename === path.posix.basename(filename) && imageExtensions.has(path.extname(filename).toLowerCase())) return;
+  }
+  if (normalized.startsWith(audioPrefix)) {
+    const filename = normalized.slice(audioPrefix.length);
+    if (filename && filename === path.posix.basename(filename) && audioExtensions.has(path.extname(filename).toLowerCase())) return;
+  }
+  throw new Error(`Unexpected file in archive: ${entry.path}`);
+}
+
+async function inspectProjectArchive(zipFile) {
+  const archive = await unzipper.Open.file(zipFile);
+  const projectEntry = archive.files.find((entry) => entry.path === 'project.json' && entry.type !== 'Directory');
+  if (!projectEntry) {
+    const error = new Error('Archive must contain a root-level project.json file.');
+    error.status = 400;
+    throw error;
+  }
+  let project;
+  try {
+    project = JSON.parse((await projectEntry.buffer()).toString('utf8'));
+  } catch {
+    const error = new Error('project.json is not valid JSON.');
+    error.status = 400;
+    throw error;
+  }
+  if (!validateProjectSchema(project)) {
+    const error = new Error('project.json does not match this application schema.');
+    error.status = 400;
+    throw error;
+  }
+  const targetDirectory = projectDir(project.id);
+  for (const entry of archive.files) {
+    const { normalized } = validateArchiveEntryPath(entry.path, targetDirectory);
+    validateArchiveShape(entry, normalized);
+  }
+  return { project, archive };
+}
+
+async function extractProjectArchive(archive, targetDirectory) {
+  const stagingDirectory = path.join(dataDir, `.import-${Date.now()}-${randomUUID()}`);
+  try {
+    await fs.mkdir(stagingDirectory, { recursive: true });
+    for (const entry of archive.files) {
+      const { normalized, targetFile } = validateArchiveEntryPath(entry.path, stagingDirectory);
+      validateArchiveShape(entry, normalized);
+      if (entry.type === 'Directory') {
+        await fs.mkdir(targetFile, { recursive: true });
+        continue;
+      }
+      await fs.mkdir(path.dirname(targetFile), { recursive: true });
+      await new Promise((resolve, reject) => {
+        entry
+          .stream()
+          .pipe(createWriteStream(targetFile))
+          .on('finish', resolve)
+          .on('error', reject);
+      });
+    }
+    await fs.rm(targetDirectory, { recursive: true, force: true });
+    await fs.rename(stagingDirectory, targetDirectory);
+  } catch (error) {
+    await fs.rm(stagingDirectory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 app.get('/api/health', (_request, response) => {
   response.json({
     ok: true,
@@ -240,6 +382,70 @@ app.delete('/api/projects/:id', async (request, response) => {
     projects: data.projects.filter((project) => project.id !== request.params.id),
     openProjectId,
   });
+});
+
+app.get('/api/projects/:projectId/export', async (request, response, next) => {
+  try {
+    const project = await readProject(request.params.projectId);
+    if (!project) {
+      response.status(404).json({ error: 'Project not found.' });
+      return;
+    }
+
+    response.setHeader('Content-Type', 'application/zip');
+    response.setHeader('Content-Disposition', `attachment; filename="${sanitizeArchiveName(project.name)}"`);
+
+    const archive = new ZipArchive({ zlib: { level: 9 } });
+    archive.on('error', next);
+    archive.pipe(response);
+    archive.directory(projectDir(project.id), false);
+    await archive.finalize();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/projects/import', importUpload.single('file'), async (request, response) => {
+  const uploadedFile = request.file?.path;
+  const uploadedDir = uploadedFile ? path.dirname(uploadedFile) : null;
+  try {
+    if (!uploadedFile) {
+      response.status(400).json({ error: 'No archive uploaded.' });
+      return;
+    }
+    if (path.extname(request.file.originalname || '').toLowerCase() !== '.zip') {
+      response.status(400).json({ error: 'Import file must be a .zip archive.' });
+      return;
+    }
+
+    await fs.mkdir(dataDir, { recursive: true });
+    const { project, archive } = await inspectProjectArchive(uploadedFile);
+    const overwrite = String(request.query.overwrite || 'false').toLowerCase() === 'true';
+    const existingDirectory = await pathExists(projectDir(project.id));
+    const existingProject = await readProject(project.id);
+
+    if (existingDirectory && !overwrite) {
+      response.status(409).json({
+        error: 'Project already exists.',
+        conflict: {
+          id: existingProject?.id || project.id,
+          name: existingProject?.name || project.id,
+          incomingName: project.name,
+        },
+      });
+      return;
+    }
+
+    await extractProjectArchive(archive, projectDir(project.id));
+    await ensureProjectFolders(project.id);
+    await writeOpenProjectId(project.id);
+    const data = await readProjects();
+    response.status(existingDirectory ? 200 : 201).json({ ...data, importedProjectId: project.id });
+  } catch (error) {
+    response.status(error.status || 400).json({ error: error.message || 'Unable to import project archive.' });
+  } finally {
+    if (uploadedDir) await fs.rm(uploadedDir, { recursive: true, force: true }).catch(() => {});
+  }
 });
 
 app.post('/api/projects/:id/open', async (request, response) => {

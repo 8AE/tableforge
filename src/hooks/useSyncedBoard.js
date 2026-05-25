@@ -152,6 +152,31 @@ export function useSyncedBoard() {
     commitPayload(payload);
   };
 
+  const importProject = async (file, options = {}) => {
+    if (!file) return { ok: false };
+    setError('');
+    const form = new FormData();
+    form.append('file', file);
+    const response = await fetch(`/api/projects/import?overwrite=${options.overwrite ? 'true' : 'false'}`, {
+      method: 'POST',
+      body: form,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 409) {
+      return { ok: false, conflict: body.conflict || null, error: body.error || 'Project already exists.' };
+    }
+    if (!response.ok) {
+      const message = body.error || 'Unable to import project.';
+      setError(message);
+      return { ok: false, error: message };
+    }
+    setSelectedProjectId(body.importedProjectId || null);
+    setPast([]);
+    setFuture([]);
+    commitPayload(body);
+    return { ok: true, importedProjectId: body.importedProjectId };
+  };
+
   const publishProjectToPlayers = async (id = selectedProjectId) => {
     if (!id) return;
     const response = await fetch(`/api/projects/${id}/open`, { method: 'POST' });
@@ -212,6 +237,7 @@ export function useSyncedBoard() {
     leaveProject,
     renameProject,
     deleteProject,
+    importProject,
     publishProjectToPlayers,
     undo,
     redo,

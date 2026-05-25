@@ -1316,6 +1316,18 @@ input[type="range"] {
   background: rgba(255, 255, 255, 0.05);
 }
 
+.project-card-header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.project-card-header > div {
+  display: grid;
+  gap: 6px;
+}
+
 .empty-player strong,
 .project-card strong {
   font-size: 22px;
@@ -1334,18 +1346,34 @@ input[type="range"] {
 
 .project-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   gap: 8px;
   align-items: center;
 }
 
 .project-list button,
-.project-create button {
+.project-list a,
+.project-create button,
+.project-import-button,
+.project-conflict-actions button {
   min-height: 38px;
   color: #f5f3ed;
   border: 1px solid rgba(245, 243, 237, 0.15);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.07);
+}
+
+.project-list a,
+.project-import-button {
+  display: inline-grid;
+  place-items: center;
+  padding: 0 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.project-import-button input {
+  display: none;
 }
 
 .danger-text {
@@ -1355,6 +1383,43 @@ input[type="range"] {
 
 .form-error {
   color: #ffb4aa;
+}
+
+.form-success {
+  color: #9ff0c5;
+}
+
+.project-conflict-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 8, 14, 0.72);
+}
+
+.project-conflict-modal {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid rgba(245, 243, 237, 0.18);
+  border-radius: 8px;
+  background: #151923;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.project-conflict-modal p {
+  margin: 0;
+  color: #d4cec0;
+  line-height: 1.5;
+}
+
+.project-conflict-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .app-player .fullscreen-active .topbar {
@@ -1383,6 +1448,20 @@ input[type="range"] {
 @media (max-width: 900px) {
   body {
     overflow: auto;
+  }
+
+  .project-card-header,
+  .project-conflict-actions {
+    flex-direction: column;
+  }
+
+  .project-import-button,
+  .project-conflict-actions button {
+    width: 100%;
+  }
+
+  .project-row {
+    grid-template-columns: 1fr;
   }
 
   .app {
