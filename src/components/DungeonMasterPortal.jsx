@@ -29,14 +29,15 @@ import {
 } from 'lucide-react';
 import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
-import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
 import { boxesOverlap, defaultLighting, getBoard, getBoardEntity, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
 import { dungeonToBoard, normalizeDungeon } from '../lib/dungeon';
 
 export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
   const [tool, setTool] = useState('select');
-  const [activeLayer, setActiveLayer] = useState('player');
+  const [activeLayer, setActiveLayer] = useState('token');
+  const [layerNotice, setLayerNotice] = useState('');
+  const [publishToast, setPublishToast] = useState('');
   const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1 });
   const [drawColor, setDrawColor] = useState('#36d399');
   const [drawLayer, setDrawLayer] = useState('player');
@@ -44,8 +45,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [clipboard, setClipboard] = useState(null);
   const [tokensExpanded, setTokensExpanded] = useState(true);
   const [drawingsExpanded, setDrawingsExpanded] = useState(true);
-  const [activeSidebarTab, setActiveSidebarTab] = useState('campaign');
+  const [activeSidebarTab, setActiveSidebarTab] = useState('journal');
   const [isQuickMenuCollapsed, setIsQuickMenuCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem('tableforge-dm-sidebar-width'));
+    return Number.isFinite(saved) && saved >= 300 ? saved : 380;
+  });
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [editingLibraryTokenId, setEditingLibraryTokenId] = useState(null);
   const [bestiaryQuery, setBestiaryQuery] = useState('');
@@ -62,7 +67,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
   const [isDungeonImportOpen, setIsDungeonImportOpen] = useState(false);
   const [boardDeleteTarget, setBoardDeleteTarget] = useState(null);
-  const [boardDeleteName, setBoardDeleteName] = useState('');
   const [boardDeleteError, setBoardDeleteError] = useState('');
   const [dungeonLibrary, setDungeonLibrary] = useState([]);
   const [dungeonImportError, setDungeonImportError] = useState('');
@@ -70,6 +74,29 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const tokenLibrary = state.tokenLibrary || [];
   const imageAssets = assets.filter((asset) => asset.type === 'image');
   const audioAssets = assets.filter((asset) => asset.type === 'audio');
+  const sidebarStyle = { '--dm-sidebar-width': `${sidebarWidth}px` };
+
+  const startSidebarResize = (event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const minWidth = 300;
+    const maxWidth = Math.min(620, Math.max(360, window.innerWidth - 420));
+
+    const onPointerMove = (moveEvent) => {
+      const nextWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + startX - moveEvent.clientX));
+      setSidebarWidth(nextWidth);
+    };
+    const onPointerUp = (upEvent) => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      const nextWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + startX - upEvent.clientX));
+      window.localStorage.setItem('tableforge-dm-sidebar-width', String(Math.round(nextWidth)));
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp, { once: true });
+  };
 
   const updateBoard = (patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, ...patch })));
@@ -192,7 +219,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       y: point.y,
       label: tokenDraft.label || 'Token',
       color: tokenDraft.color,
-      layer: activeLayer,
+      layer: activeLayer === 'gm' ? 'dm' : 'player',
       size: Number(tokenDraft.size) || 1,
       visible: true,
       visionEnabled: true,
@@ -379,37 +406,51 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     }
   };
 
-  const duplicateBoard = () => {
+  const duplicateBoard = (boardId = board.id) => {
+    const sourceBoard = state.boards.find((item) => item.id === boardId) || board;
     const next = {
-      ...structuredClone(board),
+      ...structuredClone(sourceBoard),
       id: uid('board'),
-      name: `${board.name} Copy`,
-      tokens: board.tokens.map((token) => ({ ...token, id: uid('token') })),
-      drawings: board.drawings.map((drawing) => ({ ...drawing, id: uid('drawing') })),
+      name: `${sourceBoard.name} Copy`,
+      tokens: sourceBoard.tokens.map((token) => ({ ...token, id: uid('token') })),
+      drawings: sourceBoard.drawings.map((drawing) => ({ ...drawing, id: uid('drawing') })),
     };
     setState((current) => ({ ...current, boards: [...current.boards, next], activeBoardId: next.id }));
   };
 
   const requestDeleteBoard = (item) => {
     setBoardDeleteTarget(item);
-    setBoardDeleteName('');
     setBoardDeleteError('');
   };
 
   const confirmDeleteBoard = async () => {
-    if (!boardDeleteTarget || boardDeleteName.trim() !== boardDeleteTarget.name) return;
+    if (!boardDeleteTarget) return;
     const result = await deleteBoard?.(openProjectId, boardDeleteTarget.id);
     if (result?.ok === false) {
       setBoardDeleteError(result.error || 'Unable to delete board.');
       return;
     }
     setBoardDeleteTarget(null);
-    setBoardDeleteName('');
   };
 
-  const showBoardToPlayers = () => {
-    setState((current) => ({ ...current, playerBoardId: current.activeBoardId }), { skipHistory: true });
+  const showBoardToPlayers = (boardId = state.activeBoardId) => {
+    const publishedBoard = state.boards.find((item) => item.id === boardId) || board;
+    const timestamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    setState((current) => ({ ...current, playerBoardId: boardId }), { skipHistory: true });
+    setPublishToast(`Active Board Published to Players ${timestamp}: ${publishedBoard.name}`);
+    window.setTimeout(() => setPublishToast(''), 2600);
     window.setTimeout(() => publishProjectToPlayers(openProjectId), 320);
+  };
+
+  const switchActiveLayer = (layer) => {
+    setActiveLayer(layer);
+    setDrawLayer(layer === 'gm' ? 'dm' : 'player');
+    if (layer === 'map') setTool('background');
+    if (layer === 'walls' && !['select', 'wall', 'door', 'light'].includes(tool)) setTool('wall');
+    if (['token', 'gm'].includes(layer) && ['background', 'wall', 'door', 'light'].includes(tool)) setTool('select');
+    const label = { map: 'Map & Background', token: 'Tokens & Objects', gm: 'GM Info Layer', walls: 'Walls & Lighting' }[layer] || layer;
+    setLayerNotice(label);
+    window.setTimeout(() => setLayerNotice(''), 1100);
   };
 
   const addLightReveal = (reveal) => {
@@ -651,17 +692,17 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const selectedWall = selected?.type === 'wall' ? board.lighting?.walls?.find((wall) => wall.id === selected.id) : null;
   const selectedDoor = selected?.type === 'door' ? board.doors?.find((door) => door.id === selected.id) : null;
   const sidebarTabs = [
-    ['campaign', 'Campaign'],
-    ['map', 'Map'],
-    ['entities', 'Entities'],
-    ['soundboard', 'Soundboard'],
-    ['settings', 'Settings'],
+    ['journal', 'Board Items'],
+    ['library', 'Assets & Boards'],
+    ['soundboard', 'Audio'],
+    ['settings', 'Board Setup'],
   ];
   const quickMapTools = [
-    ['select', <MousePointer2 size={17} />, 'Select & Move'],
-    ['ruler', <Ruler size={17} />, 'Measuring Tool'],
-    ['draw', <Brush size={17} />, 'Drawing Tool'],
-    ['light', <Lightbulb size={17} />, 'Lighting & Vision'],
+    ['select', <MousePointer2 size={18} />, 'Select & Pan', 'V'],
+    ['token', <Plus size={18} />, 'Place Token', 'T'],
+    ['draw', <Brush size={18} />, 'Drawing & Shapes', 'D'],
+    ['ruler', <Ruler size={18} />, 'Ruler / Measurement', 'M'],
+    ['light', <Lightbulb size={18} />, 'Lighting & Vision', 'L'],
   ];
 
   useEffect(() => {
@@ -669,6 +710,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       const mod = event.metaKey || event.ctrlKey;
       const tag = event.target?.tagName?.toLowerCase();
       if (['input', 'select', 'textarea'].includes(tag)) return;
+      const keyTools = { v: 'select', t: 'token', d: 'draw', m: 'ruler', l: 'light' };
+      if (!event.metaKey && !event.ctrlKey && keyTools[event.key.toLowerCase()]) {
+        event.preventDefault();
+        setTool(keyTools[event.key.toLowerCase()]);
+        return;
+      }
       const arrowDeltas = {
         arrowup: [0, -1],
         arrowdown: [0, 1],
@@ -714,12 +761,28 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   return (
     <>
-      <section className="workspace">
-        <Topbar board={board} mode="dm" />
+      <section className="workspace" style={sidebarStyle}>
+        <Topbar
+          board={board}
+          mode="dm"
+          boards={state.boards}
+          activeBoardId={state.activeBoardId}
+          playerBoardId={state.playerBoardId}
+          activeLayer={activeLayer}
+          onLayerChange={switchActiveLayer}
+          onBoardSelect={(id) => setState((current) => ({ ...current, activeBoardId: id }), { skipHistory: true })}
+          onAddBoard={addBoard}
+          onImportBoard={openDungeonImport}
+          onDuplicateBoard={duplicateBoard}
+          onDeleteBoard={requestDeleteBoard}
+          onPublishBoard={showBoardToPlayers}
+        />
         <div className="map-viewport">
+          {layerNotice && <div className="layer-notice" role="status">{layerNotice}</div>}
+          {publishToast && <div className="publish-toast" role="status">{publishToast}</div>}
           <div className={`quick-map-menu ${isQuickMenuCollapsed ? 'collapsed' : ''}`}>
             <div className="quick-menu-tools" aria-label="Map quick access tools">
-              {quickMapTools.map(([id, icon, label]) => (
+              {quickMapTools.map(([id, icon, label, hotkey]) => (
                 <button
                   key={id}
                   type="button"
@@ -729,10 +792,30 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                   onClick={() => setTool(id)}
                 >
                   {icon}
-                  <span>{label.replace(' Tool', '')}</span>
+                  <span>{hotkey}</span>
                 </button>
               ))}
             </div>
+            {['draw', 'shape', 'square', 'circle', 'cone', 'light', 'wall', 'door'].includes(tool) && (
+              <div className="tool-popout" role="group" aria-label={`${tool} options`}>
+                {['draw', 'shape', 'square', 'circle', 'cone'].includes(tool) && (
+                  <>
+                    <button type="button" className={tool === 'draw' ? 'active' : ''} onClick={() => setTool('draw')}>Freehand</button>
+                    <button type="button" className={tool === 'shape' ? 'active' : ''} onClick={() => setTool('shape')}>Rect</button>
+                    <button type="button" className={tool === 'circle' ? 'active' : ''} onClick={() => setTool('circle')}>Circle</button>
+                    <button type="button" className={tool === 'cone' ? 'active' : ''} onClick={() => setTool('cone')}>Cone</button>
+                    <input aria-label="Stroke color" type="color" value={drawColor} onChange={(event) => setDrawColor(event.target.value)} />
+                  </>
+                )}
+                {['light', 'wall', 'door'].includes(tool) && (
+                  <>
+                    <button type="button" className={tool === 'wall' ? 'active' : ''} onClick={() => setTool('wall')}>Wall</button>
+                    <button type="button" className={tool === 'door' ? 'active' : ''} onClick={() => setTool('door')}>Door</button>
+                    <button type="button" className={tool === 'light' ? 'active' : ''} onClick={() => setTool('light')}>Reveal / Hide</button>
+                  </>
+                )}
+              </div>
+            )}
             <button
               className="quick-menu-toggle"
               type="button"
@@ -773,7 +856,14 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         </div>
       </section>
 
-      <aside className="sidebar">
+      <aside className="sidebar" style={sidebarStyle}>
+        <button
+          className="sidebar-resize-handle"
+          type="button"
+          aria-label="Resize right sidebar"
+          title="Resize sidebar"
+          onPointerDown={startSidebarResize}
+        />
         <div className="brand">
           <Grid2X2 size={22} />
           <div>
@@ -796,7 +886,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         </nav>
 
         <div className="sidebar-body">
-          {activeSidebarTab === 'campaign' && (
+          {activeSidebarTab === 'library' && (
             <div className="sidebar-tab-panel">
 
         <Panel title="Project" icon={<Layers size={16} />}>
@@ -875,13 +965,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <button className="command" title="Create a new empty board in this project" onClick={addBoard}><Plus size={16} /> New</button>
             <button className="command" title="Duplicate the active board" onClick={duplicateBoard}><Copy size={16} /> Duplicate</button>
           </div>
-          <button className="command accent" title="Publish the active board to the player viewer" onClick={showBoardToPlayers}><Send size={16} /> Show active board to players</button>
-          <button className="command" title="Import a reusable dungeon map as a new board" onClick={openDungeonImport}><Library size={16} /> Import Dungeon Map</button>
+          <button className="command accent" title="Publish the active board to the player viewer" onClick={() => showBoardToPlayers()}><Send size={16} /> Show active board to players</button>
         </Panel>
             </div>
           )}
 
-          {activeSidebarTab === 'map' && (
+          {activeSidebarTab === 'settings' && (
             <div className="sidebar-tab-panel">
 
         <Panel title="Board" icon={<Image size={16} />}>
@@ -982,14 +1071,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           </div>
         </Panel>
 
-        <Panel title="Tools" icon={<MousePointer2 size={16} />}>
-          <ToolGrid value={tool} onChange={setTool} />
-          <div className="segmented">
-            <button className={activeLayer === 'player' ? 'active' : ''} onClick={() => setActiveLayer('player')}><Users size={15} /> Player</button>
-            <button className={activeLayer === 'dm' ? 'active' : ''} onClick={() => setActiveLayer('dm')}><EyeOff size={15} /> DM</button>
-          </div>
-        </Panel>
-
         <Panel title="Lighting" icon={<EyeOff size={16} />}>
           <label className="check-row" title="Darken the player board and reveal only lit areas">
             <input type="checkbox" checked={Boolean(board.lighting?.enabled)} onChange={(event) => updateLighting({ enabled: event.target.checked })} />
@@ -1065,7 +1146,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             </div>
           )}
 
-          {activeSidebarTab === 'entities' && (
+          {activeSidebarTab === 'journal' && (
             <div className="sidebar-tab-panel">
 
         <Panel title="Token" icon={<Plus size={16} />}>
@@ -1470,16 +1551,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           <div className="project-conflict-modal">
             <strong>Delete Board</strong>
             <p>
-              Are you sure you want to delete the board '{boardDeleteTarget.name}'? This will permanently erase all tokens, drawings, and configurations hosted on this map. This action is irreversible.
+              Delete '{boardDeleteTarget.name}'? This will remove the board, including its tokens, drawings, walls, lighting, and map configuration.
             </p>
-            <label>
-              Type the board name to confirm
-              <input value={boardDeleteName} onChange={(event) => setBoardDeleteName(event.target.value)} autoFocus />
-            </label>
             {boardDeleteError && <p className="form-error">{boardDeleteError}</p>}
             <div className="project-conflict-actions">
-              <button className="command danger" disabled={boardDeleteName.trim() !== boardDeleteTarget.name} onClick={confirmDeleteBoard}>
-                Yes, Delete Permanently
+              <button className="command danger" onClick={confirmDeleteBoard} autoFocus>
+                Delete Board
               </button>
               <button className="command" onClick={() => setBoardDeleteTarget(null)}>Cancel</button>
             </div>

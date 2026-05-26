@@ -23,6 +23,7 @@ export function BoardCanvas({
   tool,
   selected,
   setSelected,
+  activeLayer = 'token',
   drawLayer = 'player',
   drawColor = '#36d399',
   onAddToken,
@@ -83,6 +84,16 @@ export function BoardCanvas({
     () => board.drawings.filter((drawing) => view === 'dm' || (drawing.layer === 'player' && drawing.visible !== false)),
     [board.drawings, view],
   );
+  const activeCanvasDrawings = useMemo(() => (
+    visibleDrawings.filter((drawing) => {
+      if (activeLayer === 'gm') return drawing.layer === 'dm';
+      if (activeLayer === 'token') return drawing.layer === 'player';
+      return false;
+    })
+  ), [activeLayer, visibleDrawings]);
+  const activeCanvasTokens = useMemo(() => (
+    visibleTokensForLayer(dmTokens, activeLayer)
+  ), [activeLayer, dmTokens]);
   const brightPolygons = useMemo(() => (
     playerTokens
       .filter((token) => token.visionEnabled !== false && Number(token.visionBrightFeet ?? token.visionFeet) > 0)
@@ -145,13 +156,13 @@ export function BoardCanvas({
     };
   };
 
-  const tokenAt = (point) => [...visibleTokens].reverse().find((token) => (
+  const tokenAt = (point) => [...activeCanvasTokens].reverse().find((token) => (
     point.x >= token.x && point.x <= token.x + token.size && point.y >= token.y && point.y <= token.y + token.size
   ));
 
-  const drawingAt = (point) => [...visibleDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing));
-  const wallAt = (point) => [...lighting.walls].reverse().find((wall) => isPointNearWall(point, wall));
-  const doorAt = (point) => [...visibleDoors].reverse().find((door) => Math.hypot(point.x - door.position.x, point.y - door.position.y) <= 0.45);
+  const drawingAt = (point) => [...activeCanvasDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing));
+  const wallAt = (point) => activeLayer === 'walls' ? [...lighting.walls].reverse().find((wall) => isPointNearWall(point, wall)) : null;
+  const doorAt = (point) => activeLayer === 'walls' ? [...visibleDoors].reverse().find((door) => Math.hypot(point.x - door.position.x, point.y - door.position.y) <= 0.45) : null;
   const isSelected = (type, id) => selectedItems.some((item) => item.type === type && item.id === id);
 
   const onPointerDown = (event) => {
@@ -164,6 +175,11 @@ export function BoardCanvas({
     const drawing = drawingAt(point);
     const wall = wallAt(point);
     const door = doorAt(point);
+
+    if (activeLayer !== 'map' && tool === 'background') {
+      setSelected(null);
+      return;
+    }
 
     if (tool === 'background' && !background.fitToBoard) {
       const bgWidth = width * background.scale;
@@ -179,12 +195,12 @@ export function BoardCanvas({
       return;
     }
 
-    if (tool === 'token') {
+    if (tool === 'token' && ['token', 'gm'].includes(activeLayer)) {
       onAddToken(snapped);
       return;
     }
 
-    if (tool === 'door') {
+    if (tool === 'door' && activeLayer === 'walls') {
       onAddDoor?.(doorFromPoint(point));
       return;
     }
@@ -243,13 +259,21 @@ export function BoardCanvas({
       return;
     }
 
+    if (['ruler', 'square', 'circle', 'cone', 'shape'].includes(tool) && !['token', 'gm'].includes(activeLayer)) {
+      return;
+    }
+
+    if (['light', 'wall'].includes(tool) && activeLayer !== 'walls') {
+      return;
+    }
+
     if (['ruler', 'square', 'circle', 'cone', 'shape', 'light', 'wall'].includes(tool)) {
       const type = tool === 'light' && event.button === 2 ? 'light-hide' : tool;
       setDrag({ type, start: type === 'wall' ? wallPoint : snapped, end: type === 'wall' ? wallPoint : snapped, freeform: type === 'wall' && !lighting.snapWallsToGrid });
       return;
     }
 
-    if (tool === 'draw') {
+    if (tool === 'draw' && ['token', 'gm'].includes(activeLayer)) {
       setDrag({ type: 'draw', points: [point] });
     }
   };
@@ -430,7 +454,7 @@ export function BoardCanvas({
       });
     }
     if (drag.type === 'marquee') {
-      onSelectMultiple?.(selectablesInBounds(marqueeBounds(drag), board, visibleTokens, visibleDrawings, lighting.walls, visibleDoors), drag.mode);
+      onSelectMultiple?.(selectablesInBounds(marqueeBounds(drag), board, activeCanvasTokens, activeCanvasDrawings, activeLayer === 'walls' ? lighting.walls : [], activeLayer === 'walls' ? visibleDoors : []), drag.mode);
     }
     if (['square', 'circle', 'cone', 'shape'].includes(drag.type)) {
       onAddDrawing({
@@ -494,7 +518,7 @@ export function BoardCanvas({
     <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
       <div className="board-stage" style={{ width: stageWidth, height: stageHeight }}>
         <div
-          className={`board ${fitToViewport ? 'board-fit' : ''}`}
+          className={`board active-layer-${activeLayer} ${fitToViewport ? 'board-fit' : ''}`}
           style={{
             width,
             height,
@@ -668,12 +692,13 @@ function nearestDoorEdge(localX, localY, cell) {
 
 function renderDrawing(drawing, tile, selected, selectedOverride = false) {
   const isSelected = selectedOverride || (selected?.type === 'drawing' && selected.id === drawing.id);
+  const className = `${drawing.layer === 'dm' ? 'drawing-gm' : 'drawing-player'} ${isSelected ? 'selected-drawing' : ''}`.trim();
   if (drawing.type === 'path') {
     const d = drawing.points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x * tile} ${point.y * tile}`).join(' ');
     return (
       <path
         key={drawing.id}
-        className={isSelected ? 'selected-drawing' : ''}
+        className={className}
         d={d}
         fill="none"
         stroke={drawing.color}
@@ -721,7 +746,7 @@ function renderStoredShape(drawing, tile, isSelected = false) {
   const h = box.h * tile;
   const common = {
     key: `${drawing.id}-shape`,
-    className: isSelected ? 'selected-drawing' : '',
+    className: `${drawing.layer === 'dm' ? 'drawing-gm' : 'drawing-player'} ${isSelected ? 'selected-drawing' : ''}`.trim(),
     fill: drawing.fill,
     stroke: drawing.color,
     strokeWidth: isSelected ? drawing.strokeWidth + 2 : drawing.strokeWidth,
@@ -843,6 +868,12 @@ function boundsOverlap(a, b) {
 
 function isGroupEntityDrag(drag) {
   return ['token', 'drawing', 'wall-move', 'door'].includes(drag?.type);
+}
+
+function visibleTokensForLayer(tokens, activeLayer) {
+  if (activeLayer === 'gm') return tokens.filter((token) => token.layer === 'dm');
+  if (activeLayer === 'token') return tokens.filter((token) => token.layer === 'player');
+  return [];
 }
 
 function renderRevealHole(reveal, tile, fill = 'black') {
