@@ -9,6 +9,12 @@ export const defaultLighting = {
   hiddenReveals: [],
   walls: [],
 };
+export const entityCapabilities = {
+  token: { selectable: true, movable: true, deletable: true, editable: true, contextMenu: true },
+  drawing: { selectable: true, movable: true, deletable: true, editable: true, contextMenu: true },
+  wall: { selectable: true, movable: true, deletable: true, editable: true, contextMenu: true },
+  door: { selectable: true, movable: true, deletable: true, editable: true, contextMenu: true },
+};
 
 export function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -30,6 +36,7 @@ export function makeBoard(name = 'Blackstone Crossing') {
       fitToBoard: false,
     },
     lighting: { ...defaultLighting },
+    doors: [],
     tokens: [
       { id: 'hero-1', x: 5, y: 7, label: 'Kara', color: '#3ea7ff', layer: 'player', size: 1, visible: true, visionEnabled: true },
       { id: 'hero-2', x: 7, y: 8, label: 'Brom', color: '#f2c94c', layer: 'player', size: 1, visible: true, visionEnabled: true },
@@ -92,10 +99,11 @@ export function migrateState(raw) {
           ...defaultLighting,
           ...board.lighting,
           hiddenReveals: board.lighting?.hiddenReveals || [],
-          walls: board.lighting?.walls || [],
+          walls: (board.lighting?.walls || []).map((wall) => normalizeWall(wall)),
         },
         tokens: (board.tokens || []).map((token) => normalizeBoardToken(token)),
-        drawings: (board.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
+        drawings: (board.drawings || []).map((drawing) => normalizeDrawing(drawing)),
+        doors: normalizeDoors(board.doors || board.dungeonMetadata?.doors || []),
       })),
       playerBoardId: raw.playerBoardId || raw.activeBoardId || raw.boards[0].id,
     };
@@ -114,8 +122,9 @@ export function migrateState(raw) {
         fitToBoard: false,
       },
       lighting: { ...defaultLighting },
+      doors: [],
       tokens: (raw.tokens || []).map((token) => normalizeBoardToken(token)),
-      drawings: (raw.drawings || []).map((drawing) => ({ ...drawing, visible: drawing.visible ?? true })),
+      drawings: (raw.drawings || []).map((drawing) => normalizeDrawing(drawing)),
     };
     return { boards: [migrated], activeBoardId: migrated.id, playerBoardId: migrated.id, tokenLibrary: [], fiveEToolsBaseUrl: 'https://5e.tools/' };
   }
@@ -144,6 +153,7 @@ export function normalizeLibraryToken(token = {}) {
 
 export function normalizeBoardToken(token = {}) {
   return {
+    ...entityBase('token', token),
     visionFeet: 0,
     visionBrightFeet: Number(token.visionBrightFeet ?? token.visionFeet) || 0,
     visionDimFeet: Number(token.visionDimFeet ?? token.visionFeet) || 0,
@@ -152,7 +162,65 @@ export function normalizeBoardToken(token = {}) {
     visionMode: 'darkvision',
     visionEnabled: true,
     ...token,
+    ...entityCapabilities.token,
+    entityType: 'token',
   };
+}
+
+export function normalizeDrawing(drawing = {}) {
+  return {
+    ...entityBase('drawing', drawing),
+    ...drawing,
+    ...entityCapabilities.drawing,
+    entityType: 'drawing',
+    visible: drawing.visible ?? true,
+  };
+}
+
+export function normalizeWall(wall = {}) {
+  return {
+    ...entityBase('wall', wall),
+    ...wall,
+    ...entityCapabilities.wall,
+    entityType: 'wall',
+  };
+}
+
+export function normalizeDoors(doors = []) {
+  if (!Array.isArray(doors)) return [];
+  return doors
+    .filter((door) => door && typeof door === 'object')
+    .map((door) => ({
+      ...entityBase('door', door),
+      id: door.id || uid('door'),
+      type: 'door',
+      position: {
+        x: Number(door.position?.x ?? door.x ?? 0),
+        y: Number(door.position?.y ?? door.y ?? 0),
+      },
+      edge: door.edge || 'north',
+      state: ['open', 'closed', 'locked'].includes(door.state) ? door.state : 'closed',
+      isLocked: Boolean(door.isLocked || door.state === 'locked'),
+      lightingSegment: normalizeDoorSegment(door.lightingSegment),
+      ...entityCapabilities.door,
+      entityType: 'door',
+    }));
+}
+
+export function entityBase(entityType, item = {}) {
+  return {
+    id: item.id || uid(entityType),
+    entityType,
+    ...(entityCapabilities[entityType] || {}),
+  };
+}
+
+function normalizeDoorSegment(segment) {
+  if (!Array.isArray(segment) || segment.length < 2) return [[0, 0], [0, 0]];
+  return [
+    [Number(segment[0]?.[0]) || 0, Number(segment[0]?.[1]) || 0],
+    [Number(segment[1]?.[0]) || 0, Number(segment[1]?.[1]) || 0],
+  ];
 }
 
 export function readInitialState() {
@@ -255,6 +323,86 @@ export function revealBox(reveal) {
 
 export function boxesOverlap(a, b) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+export function selectableBounds(item, type) {
+  if (!item) return null;
+  if (type === 'token') return { x: item.x, y: item.y, w: item.size, h: item.size };
+  if (type === 'drawing') return drawingBounds(item);
+  if (type === 'wall') return wallBounds(item);
+  if (type === 'door') return doorBounds(item);
+  return null;
+}
+
+export function offsetEntity(item, type, dx, dy) {
+  if (type === 'token') return { ...item, x: Math.max(0, item.x + dx), y: Math.max(0, item.y + dy) };
+  if (type === 'drawing') return { ...item, ...offsetDrawing(item, dx, dy) };
+  if (type === 'wall') return offsetWall(item, dx, dy);
+  if (type === 'door') return offsetDoor(item, dx, dy);
+  return item;
+}
+
+export function getBoardEntity(board, target) {
+  if (!board || !target) return null;
+  if (target.type === 'token') return board.tokens.find((token) => token.id === target.id) || null;
+  if (target.type === 'drawing') return board.drawings.find((drawing) => drawing.id === target.id) || null;
+  if (target.type === 'wall') return board.lighting?.walls?.find((wall) => wall.id === target.id) || null;
+  if (target.type === 'door') return board.doors?.find((door) => door.id === target.id) || null;
+  return null;
+}
+
+export function drawingBounds(drawing) {
+  if (!drawing) return null;
+  if (drawing.type === 'path') {
+    const xs = drawing.points.map((point) => point.x);
+    const ys = drawing.points.map((point) => point.y);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+  }
+  if (drawing.type === 'measurement') {
+    const x = Math.min(drawing.start.x, drawing.end.x);
+    const y = Math.min(drawing.start.y, drawing.end.y);
+    return { x, y, w: Math.abs(drawing.end.x - drawing.start.x) + 1, h: Math.abs(drawing.end.y - drawing.start.y) + 1 };
+  }
+  return shapeBox(drawing);
+}
+
+export function wallBounds(wall) {
+  if (!wall) return null;
+  const offset = wall.freeform ? 0 : 0.5;
+  const x1 = wall.start.x + offset;
+  const y1 = wall.start.y + offset;
+  const x2 = wall.end.x + offset;
+  const y2 = wall.end.y + offset;
+  const x = Math.min(x1, x2);
+  const y = Math.min(y1, y2);
+  return { x, y, w: Math.max(0.12, Math.abs(x2 - x1)), h: Math.max(0.12, Math.abs(y2 - y1)) };
+}
+
+export function doorBounds(door) {
+  if (!door?.position) return null;
+  return { x: door.position.x - 0.45, y: door.position.y - 0.45, w: 0.9, h: 0.9 };
+}
+
+export function offsetWall(wall, dx, dy) {
+  return {
+    ...wall,
+    start: { x: wall.start.x + dx, y: wall.start.y + dy },
+    end: { x: wall.end.x + dx, y: wall.end.y + dy },
+  };
+}
+
+export function offsetDoor(door, dx, dy) {
+  const lightingSegment = (door.lightingSegment || [[0, 0], [0, 0]]).map(([x, y]) => [x + dx, y + dy]);
+  return {
+    ...door,
+    position: { x: door.position.x + dx, y: door.position.y + dy },
+    edge: door.edge && typeof door.edge === 'object'
+      ? { ...door.edge, x: door.edge.x + dx, y: door.edge.y + dy }
+      : door.edge,
+    lightingSegment,
+  };
 }
 
 export function wallEndpoints(wall, tile) {

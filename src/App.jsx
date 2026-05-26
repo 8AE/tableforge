@@ -10,6 +10,7 @@ export function App() {
     playerState,
     projects,
     selectedProjectId,
+    playerProjectId,
     isLoading,
     error,
     setState,
@@ -18,8 +19,10 @@ export function App() {
     leaveProject,
     renameProject,
     deleteProject,
+    deleteBoard,
     importProject,
     publishProjectToPlayers,
+    updateProjectState,
     undo,
     redo,
     canUndo,
@@ -61,6 +64,7 @@ export function App() {
           openProject={openProject}
           leaveProject={leaveProject}
           publishProjectToPlayers={publishProjectToPlayers}
+          deleteBoard={deleteBoard}
           undo={undo}
           redo={redo}
           canUndo={canUndo}
@@ -68,7 +72,7 @@ export function App() {
           onOpenDungeonBuilder={() => setWorkspace('dungeon')}
         />
       ) : (
-        <PlayerViewer state={playerState} />
+        <PlayerViewer state={playerState} projectId={playerProjectId} updateProjectState={updateProjectState} />
       )}
     </main>
   );

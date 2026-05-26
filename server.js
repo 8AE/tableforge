@@ -212,6 +212,37 @@ async function writeProject(project) {
   return nextProject;
 }
 
+function boardAssetReferences(board) {
+  const references = new Set();
+  const add = (value) => {
+    if (typeof value === 'string' && value.includes('/assets/images/')) references.add(value);
+  };
+  add(board?.background?.src);
+  for (const token of board?.tokens || []) add(token.image);
+  return references;
+}
+
+async function pruneBoardAssets(project, removedBoard) {
+  const removedRefs = boardAssetReferences(removedBoard);
+  if (!removedRefs.size) return project.assets || [];
+  const remainingRefs = new Set();
+  for (const board of project.state?.boards || []) {
+    for (const reference of boardAssetReferences(board)) remainingRefs.add(reference);
+  }
+  const nextAssets = [];
+  for (const asset of project.assets || []) {
+    const isRemovedImage = asset.type === 'image' && removedRefs.has(asset.path) && !remainingRefs.has(asset.path);
+    if (!isRemovedImage) {
+      nextAssets.push(asset);
+      continue;
+    }
+    if (asset.filename && asset.bucket === 'images') {
+      await fs.rm(path.join(projectAssetDir(project.id, 'images'), asset.filename), { force: true }).catch(() => {});
+    }
+  }
+  return nextAssets;
+}
+
 async function readProjects() {
   const ids = await listProjectIds();
   if (!ids.length && await pathExists(legacyDataFile)) {
@@ -539,6 +570,44 @@ app.delete('/api/projects/:id', async (request, response) => {
   response.json({
     projects: data.projects.filter((project) => project.id !== request.params.id),
     openProjectId,
+  });
+});
+
+app.delete('/api/projects/:projectId/boards/:boardId', async (request, response) => {
+  const project = await readProject(request.params.projectId);
+  if (!project) {
+    response.status(404).json({ error: 'Project not found.' });
+    return;
+  }
+  const boards = project.state?.boards || [];
+  if (boards.length <= 1) {
+    response.status(400).json({ error: 'A campaign must keep at least one board.' });
+    return;
+  }
+  const removedBoard = boards.find((board) => board.id === request.params.boardId);
+  if (!removedBoard) {
+    response.status(404).json({ error: 'Board not found.' });
+    return;
+  }
+
+  const remainingBoards = boards.filter((board) => board.id !== request.params.boardId);
+  const landingBoard = remainingBoards[0];
+  const nextProject = {
+    ...project,
+    state: {
+      ...project.state,
+      boards: remainingBoards,
+      activeBoardId: project.state.activeBoardId === request.params.boardId ? landingBoard.id : project.state.activeBoardId,
+      playerBoardId: project.state.playerBoardId === request.params.boardId ? landingBoard.id : project.state.playerBoardId,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+  nextProject.assets = await pruneBoardAssets(nextProject, removedBoard);
+  const savedProject = await writeProject(nextProject);
+  const data = await readProjects();
+  response.json({
+    projects: data.projects.map((item) => item.id === savedProject.id ? savedProject : item),
+    openProjectId: data.openProjectId,
   });
 });
 

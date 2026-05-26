@@ -5,8 +5,10 @@ import {
   isPointInDrawing,
   isPointNearWall,
   normalizeBackground,
+  offsetEntity,
   offsetDrawing,
   revealBox,
+  selectableBounds,
   shapeBox,
   shapeMeasurement,
   snapToTile,
@@ -25,6 +27,9 @@ export function BoardCanvas({
   drawColor = '#36d399',
   onAddToken,
   onMoveToken,
+  onMoveSelection,
+  onAddDoor,
+  onMoveDoor,
   onAddDrawing,
   onMoveDrawing,
   onMoveBackground,
@@ -33,6 +38,8 @@ export function BoardCanvas({
   onMoveLightWall,
   onRemoveLightReveal,
   onLiveMeasurement,
+  onSelectMultiple,
+  onToggleDoor,
   onDeleteSelection,
   onDuplicateSelection,
   fitToViewport = false,
@@ -41,6 +48,7 @@ export function BoardCanvas({
 }) {
   const [drag, setDrag] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
+  const [lockedDoorAlert, setLockedDoorAlert] = useState(null);
   const shellRef = useRef(null);
   const [fitScale, setFitScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -55,6 +63,14 @@ export function BoardCanvas({
   const rotationOffset = getRotationOffset(normalizedRotation, width, height, scale);
   const background = normalizeBackground(board.background);
   const lighting = { enabled: false, darkness: 0.86, reveals: [], hiddenReveals: [], walls: [], ...board.lighting };
+  const doors = board.doors || [];
+  const activeLightingWalls = useMemo(() => [
+    ...lighting.walls,
+    ...doors
+      .filter((door) => door.state === 'closed' || door.state === 'locked' || door.isLocked)
+      .map((door) => doorWall(door)),
+  ], [doors, lighting.walls]);
+  const selectedItems = selected?.type === 'multi' ? selected.items : selected ? [selected] : [];
   const playerTokens = useMemo(
     () => board.tokens.filter((token) => token.layer === 'player' && token.visible),
     [board.tokens],
@@ -70,25 +86,29 @@ export function BoardCanvas({
   const brightPolygons = useMemo(() => (
     playerTokens
       .filter((token) => token.visionEnabled !== false && Number(token.visionBrightFeet ?? token.visionFeet) > 0)
-      .map((token) => ({ id: `vision-bright-${token.id}`, points: visionPolygonPoints(token, lighting.walls, tile, token.visionBrightFeet ?? token.visionFeet) }))
-  ), [playerTokens, lighting.walls, tile]);
+        .map((token) => ({ id: `vision-bright-${token.id}`, points: visionPolygonPoints(token, activeLightingWalls, tile, token.visionBrightFeet ?? token.visionFeet) }))
+  ), [activeLightingWalls, playerTokens, tile]);
   const dimPolygons = useMemo(() => (
     playerTokens
       .filter((token) => token.visionEnabled !== false && Number(token.visionDimFeet ?? token.visionFeet) > 0)
-      .map((token) => ({ id: `vision-dim-${token.id}`, points: visionPolygonPoints(token, lighting.walls, tile, token.visionDimFeet ?? token.visionFeet) }))
-  ), [playerTokens, lighting.walls, tile]);
+        .map((token) => ({ id: `vision-dim-${token.id}`, points: visionPolygonPoints(token, activeLightingWalls, tile, token.visionDimFeet ?? token.visionFeet) }))
+  ), [activeLightingWalls, playerTokens, tile]);
   const lightPolygons = useMemo(() => {
     const playerVision = [...brightPolygons, ...dimPolygons];
     return board.tokens
       .filter((token) => token.visible !== false && (Number(token.lightBrightFeet) > 0 || Number(token.lightDimFeet) > 0))
       .filter((token) => token.layer === 'player' || pointIsInAnyPolygon(tokenCenterPixels(token, tile), playerVision))
       .flatMap((token) => [
-        Number(token.lightBrightFeet) > 0 ? { id: `light-bright-${token.id}`, tone: 'bright', points: visionPolygonPoints(token, lighting.walls, tile, token.lightBrightFeet) } : null,
-        Number(token.lightDimFeet) > 0 ? { id: `light-dim-${token.id}`, tone: 'dim', points: visionPolygonPoints(token, lighting.walls, tile, token.lightDimFeet) } : null,
+        Number(token.lightBrightFeet) > 0 ? { id: `light-bright-${token.id}`, tone: 'bright', points: visionPolygonPoints(token, activeLightingWalls, tile, token.lightBrightFeet) } : null,
+        Number(token.lightDimFeet) > 0 ? { id: `light-dim-${token.id}`, tone: 'dim', points: visionPolygonPoints(token, activeLightingWalls, tile, token.lightDimFeet) } : null,
       ].filter(Boolean));
-  }, [board.tokens, brightPolygons, dimPolygons, lighting.walls, tile]);
+  }, [activeLightingWalls, board.tokens, brightPolygons, dimPolygons, tile]);
   const allBrightPolygons = useMemo(() => [...brightPolygons, ...lightPolygons.filter((item) => item.tone === 'bright')], [brightPolygons, lightPolygons]);
   const allDimPolygons = useMemo(() => [...dimPolygons, ...lightPolygons], [dimPolygons, lightPolygons]);
+  const visibleDoors = useMemo(() => {
+    if (view === 'dm' || !lighting.enabled) return doors;
+    return doors.filter((door) => pointIsInAnyPolygon({ x: door.position.x * tile, y: door.position.y * tile }, allDimPolygons));
+  }, [allDimPolygons, doors, lighting.enabled, tile, view]);
   const visibleTokens = useMemo(() => {
     if (view === 'dm' || !lighting.enabled) return dmTokens;
     return dmTokens.filter((token) => tokenHasVision(token) || tokenIsInRevealedLight(token, lighting, allDimPolygons, tile));
@@ -131,6 +151,8 @@ export function BoardCanvas({
 
   const drawingAt = (point) => [...visibleDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing));
   const wallAt = (point) => [...lighting.walls].reverse().find((wall) => isPointNearWall(point, wall));
+  const doorAt = (point) => [...visibleDoors].reverse().find((door) => Math.hypot(point.x - door.position.x, point.y - door.position.y) <= 0.45);
+  const isSelected = (type, id) => selectedItems.some((item) => item.type === type && item.id === id);
 
   const onPointerDown = (event) => {
     if (view !== 'dm') return;
@@ -141,6 +163,7 @@ export function BoardCanvas({
     const token = tokenAt(point);
     const drawing = drawingAt(point);
     const wall = wallAt(point);
+    const door = doorAt(point);
 
     if (tool === 'background' && !background.fitToBoard) {
       const bgWidth = width * background.scale;
@@ -161,32 +184,62 @@ export function BoardCanvas({
       return;
     }
 
+    if (tool === 'door') {
+      onAddDoor?.(doorFromPoint(point));
+      return;
+    }
+
     if (tool === 'select' && token) {
-      setSelected({ type: 'token', id: token.id });
+      const isGroupDrag = isSelected('token', token.id) && selected?.type === 'multi';
+      if (!isGroupDrag) setSelected({ type: 'token', id: token.id });
       setDrag({
         type: 'token',
         id: token.id,
         offset: { x: point.x - token.x, y: point.y - token.y },
         original: { x: token.x, y: token.y },
         preview: { x: token.x, y: token.y },
+        group: isGroupDrag ? selected.items : null,
+      });
+      return;
+    }
+
+    if (tool === 'select' && door) {
+      const isGroupDrag = isSelected('door', door.id) && selected?.type === 'multi';
+      if (!isGroupDrag) setSelected({ type: 'door', id: door.id });
+      setDrag({
+        type: 'door',
+        id: door.id,
+        start: snapped,
+        original: structuredClone(door),
+        preview: structuredClone(door),
+        group: isGroupDrag ? selected.items : null,
+        dx: 0,
+        dy: 0,
       });
       return;
     }
 
     if (tool === 'select' && drawing) {
-      setSelected({ type: 'drawing', id: drawing.id });
-      setDrag({ type: 'drawing', id: drawing.id, start: snapped, dx: 0, dy: 0 });
+      const isGroupDrag = isSelected('drawing', drawing.id) && selected?.type === 'multi';
+      if (!isGroupDrag) setSelected({ type: 'drawing', id: drawing.id });
+      setDrag({ type: 'drawing', id: drawing.id, start: snapped, dx: 0, dy: 0, group: isGroupDrag ? selected.items : null });
       return;
     }
 
     if (tool === 'select' && wall) {
-      setSelected({ type: 'wall', id: wall.id });
-      setDrag({ type: 'wall-move', id: wall.id, start: wall.freeform ? clampPoint(point, board) : snapped, original: structuredClone(wall), preview: structuredClone(wall) });
+      const isGroupDrag = isSelected('wall', wall.id) && selected?.type === 'multi';
+      if (!isGroupDrag) setSelected({ type: 'wall', id: wall.id });
+      setDrag({ type: 'wall-move', id: wall.id, start: wall.freeform ? clampPoint(point, board) : snapped, original: structuredClone(wall), preview: structuredClone(wall), group: isGroupDrag ? selected.items : null, dx: 0, dy: 0 });
       return;
     }
 
     if (tool === 'select') {
-      setSelected(null);
+      setDrag({
+        type: 'marquee',
+        start: point,
+        end: point,
+        mode: event.altKey ? 'subtract' : event.shiftKey ? 'add' : 'replace',
+      });
       return;
     }
 
@@ -227,12 +280,32 @@ export function BoardCanvas({
     }
 
     if (drag.type === 'token') {
+      const preview = {
+        x: Math.max(0, Math.min(board.columns - 1, Math.floor(point.x - drag.offset.x))),
+        y: Math.max(0, Math.min(board.rows - 1, Math.floor(point.y - drag.offset.y))),
+      };
       setDrag({
         ...drag,
-        preview: {
-          x: Math.max(0, Math.min(board.columns - 1, Math.floor(point.x - drag.offset.x))),
-          y: Math.max(0, Math.min(board.rows - 1, Math.floor(point.y - drag.offset.y))),
-        },
+        preview,
+        dx: preview.x - drag.original.x,
+        dy: preview.y - drag.original.y,
+      });
+      return;
+    }
+
+    if (drag.type === 'marquee') {
+      setDrag({ ...drag, end: point });
+      return;
+    }
+
+    if (drag.type === 'door') {
+      const dx = snapped.x - drag.start.x;
+      const dy = snapped.y - drag.start.y;
+      setDrag({
+        ...drag,
+        dx,
+        dy,
+        preview: offsetEntity(drag.original, 'door', dx, dy),
       });
       return;
     }
@@ -248,6 +321,8 @@ export function BoardCanvas({
       const dy = current.y - drag.start.y;
       setDrag({
         ...drag,
+        dx,
+        dy,
         preview: {
           ...drag.original,
           start: { x: drag.original.start.x + dx, y: drag.original.start.y + dy },
@@ -271,6 +346,17 @@ export function BoardCanvas({
   const onBoardPointerDown = (event) => {
     setContextMenu(null);
     if (view === 'player') {
+      const point = pointFromEvent(event);
+      const door = doorAt(point);
+      if (door) {
+        if (door.state === 'locked' || door.isLocked) {
+          setLockedDoorAlert({ x: point.px, y: point.py, id: door.id });
+          window.setTimeout(() => setLockedDoorAlert((alert) => alert?.id === door.id ? null : alert), 1200);
+          return;
+        }
+        onToggleDoor?.(door.id);
+        return;
+      }
       event.currentTarget.setPointerCapture(event.pointerId);
       setDrag({ type: 'pan', start: { x: event.clientX, y: event.clientY }, original: pan });
       return;
@@ -286,8 +372,9 @@ export function BoardCanvas({
     const token = tokenAt(point);
     const drawing = drawingAt(point);
     const wall = wallAt(point);
-    if (!token && !drawing && !wall) return;
-    const target = token ? { type: 'token', id: token.id } : drawing ? { type: 'drawing', id: drawing.id } : { type: 'wall', id: wall.id };
+    const door = doorAt(point);
+    if (!token && !drawing && !door && !wall) return;
+    const target = token ? { type: 'token', id: token.id } : drawing ? { type: 'drawing', id: drawing.id } : door ? { type: 'door', id: door.id } : { type: 'wall', id: wall.id };
     setSelected(target);
     setContextMenu({ x: point.px, y: point.py, target });
   };
@@ -295,13 +382,20 @@ export function BoardCanvas({
   const onPointerUp = () => {
     if (!drag) return;
     if (drag.type === 'token') {
-      onMoveToken(drag.id, drag.preview);
+      if (drag.group?.length && (drag.dx || drag.dy)) onMoveSelection(drag.group, drag.dx, drag.dy);
+      else onMoveToken(drag.id, drag.preview);
     }
     if (drag.type === 'drawing' && (drag.dx || drag.dy)) {
-      onMoveDrawing(drag.id, drag.dx, drag.dy);
+      if (drag.group?.length) onMoveSelection(drag.group, drag.dx, drag.dy);
+      else onMoveDrawing(drag.id, drag.dx, drag.dy);
+    }
+    if (drag.type === 'door' && (drag.dx || drag.dy)) {
+      if (drag.group?.length) onMoveSelection(drag.group, drag.dx, drag.dy);
+      else onMoveDoor(drag.id, drag.preview);
     }
     if (drag.type === 'wall-move') {
-      onMoveLightWall(drag.id, drag.preview);
+      if (drag.group?.length && (drag.dx || drag.dy)) onMoveSelection(drag.group, drag.dx, drag.dy);
+      else onMoveLightWall(drag.id, drag.preview);
     }
     if (drag.type === 'draw' && drag.points.length > 1) {
       onAddDrawing({
@@ -334,6 +428,9 @@ export function BoardCanvas({
         end: drag.end,
         freeform: Boolean(drag.freeform),
       });
+    }
+    if (drag.type === 'marquee') {
+      onSelectMultiple?.(selectablesInBounds(marqueeBounds(drag), board, visibleTokens, visibleDrawings, lighting.walls, visibleDoors), drag.mode);
     }
     if (['square', 'circle', 'cone', 'shape'].includes(drag.type)) {
       onAddDrawing({
@@ -372,14 +469,26 @@ export function BoardCanvas({
     : [];
   const liveShape = drag && ['square', 'circle', 'cone', 'shape', 'ruler', 'light', 'light-hide', 'wall'].includes(drag.type) ? drag : null;
   const displayTokens = visibleTokens.map((token) => (
-    drag?.type === 'token' && drag.id === token.id ? { ...token, ...drag.preview } : token
+    isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'token' && item.id === token.id)
+      ? { ...token, x: token.x + (drag.dx || 0), y: token.y + (drag.dy || 0) }
+      : drag?.type === 'token' && drag.id === token.id ? { ...token, ...drag.preview } : token
   ));
   const displayDrawings = visibleDrawings.map((drawing) => (
-    drag?.type === 'drawing' && drag.id === drawing.id ? { ...drawing, ...offsetDrawing(drawing, drag.dx, drag.dy) } : drawing
+    isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'drawing' && item.id === drawing.id)
+      ? { ...drawing, ...offsetDrawing(drawing, drag.dx || 0, drag.dy || 0) }
+      : drag?.type === 'drawing' && drag.id === drawing.id ? { ...drawing, ...offsetDrawing(drawing, drag.dx, drag.dy) } : drawing
   ));
   const displayWalls = lighting.walls.map((wall) => (
-    drag?.type === 'wall-move' && drag.id === wall.id ? drag.preview : wall
+    isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'wall' && item.id === wall.id)
+      ? offsetEntity(wall, 'wall', drag.dx || 0, drag.dy || 0)
+      : drag?.type === 'wall-move' && drag.id === wall.id ? drag.preview : wall
   ));
+  const displayDoors = visibleDoors.map((door) => (
+    isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'door' && item.id === door.id)
+      ? offsetEntity(door, 'door', drag.dx || 0, drag.dy || 0)
+      : drag?.type === 'door' && drag.id === door.id ? drag.preview : door
+  ));
+  const liveMarquee = drag?.type === 'marquee' ? marqueeBounds(drag) : null;
 
   return (
     <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
@@ -449,8 +558,18 @@ export function BoardCanvas({
                 {allBrightPolygons.map((token) => <polygon key={`bright-${token.id}`} points={token.points} fill="black" />)}
               </mask>
             </defs>
-            {[...displayDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected))}
-            {view === 'dm' && displayWalls.map((wall) => renderLightingWall(wall, tile, selected))}
+            {[...displayDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected, isSelected('drawing', drawing.id)))}
+            {view === 'dm' && displayWalls.map((wall) => renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id)))}
+            {displayDoors.map((door) => renderDoor(door, tile, view, isSelected('door', door.id)))}
+            {liveMarquee && (
+              <rect
+                className="marquee-selection"
+                x={liveMarquee.x * tile}
+                y={liveMarquee.y * tile}
+                width={liveMarquee.w * tile}
+                height={liveMarquee.h * tile}
+              />
+            )}
             {board.liveMeasurement && drag?.type !== 'ruler' && renderLiveShape({ type: 'ruler', ...board.liveMeasurement }, tile)}
             {liveShape && renderLiveShape(liveShape, tile)}
             {lighting.enabled && (
@@ -482,7 +601,7 @@ export function BoardCanvas({
           {displayTokens.map((token) => (
             <button
               key={token.id}
-              className={`map-token token-${token.layer} ${token.image ? 'token-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${selected?.type === 'token' && selected.id === token.id ? 'selected' : ''}`}
+              className={`map-token token-${token.layer} ${token.image ? 'token-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''}`}
               style={{
                 left: token.x * tile,
                 top: token.y * tile,
@@ -498,7 +617,13 @@ export function BoardCanvas({
           {contextMenu && (
             <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
               <button onClick={() => { onDuplicateSelection(contextMenu.target); setContextMenu(null); }}>Duplicate</button>
+              {contextMenu.target.type === 'door' && <button onClick={() => { onToggleDoor(contextMenu.target.id); setContextMenu(null); }}>Toggle open/closed</button>}
               <button onClick={() => { onDeleteSelection(contextMenu.target); setContextMenu(null); }}>Delete</button>
+            </div>
+          )}
+          {lockedDoorAlert && (
+            <div className="door-alert" style={{ left: lockedDoorAlert.x, top: lockedDoorAlert.y }}>
+              Locked
             </div>
           )}
         </div>
@@ -507,8 +632,42 @@ export function BoardCanvas({
   );
 }
 
-function renderDrawing(drawing, tile, selected) {
-  const isSelected = selected?.type === 'drawing' && selected.id === drawing.id;
+function doorFromPoint(point) {
+  const cell = {
+    x: Math.max(0, Math.floor(point.x)),
+    y: Math.max(0, Math.floor(point.y)),
+  };
+  const localX = point.x - cell.x;
+  const localY = point.y - cell.y;
+  const edge = nearestDoorEdge(localX, localY, cell);
+  const segment = edge.orientation === 'h'
+    ? [[edge.x, edge.y], [edge.x + 1, edge.y]]
+    : [[edge.x, edge.y], [edge.x, edge.y + 1]];
+  return {
+    id: uid('door'),
+    type: 'door',
+    position: {
+      x: (segment[0][0] + segment[1][0]) / 2,
+      y: (segment[0][1] + segment[1][1]) / 2,
+    },
+    edge,
+    state: 'closed',
+    isLocked: false,
+    lightingSegment: segment,
+  };
+}
+
+function nearestDoorEdge(localX, localY, cell) {
+  return [
+    { orientation: 'h', x: cell.x, y: cell.y, distance: localY },
+    { orientation: 'h', x: cell.x, y: cell.y + 1, distance: 1 - localY },
+    { orientation: 'v', x: cell.x, y: cell.y, distance: localX },
+    { orientation: 'v', x: cell.x + 1, y: cell.y, distance: 1 - localX },
+  ].sort((a, b) => a.distance - b.distance)[0];
+}
+
+function renderDrawing(drawing, tile, selected, selectedOverride = false) {
+  const isSelected = selectedOverride || (selected?.type === 'drawing' && selected.id === drawing.id);
   if (drawing.type === 'path') {
     const d = drawing.points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x * tile} ${point.y * tile}`).join(' ');
     return (
@@ -623,9 +782,9 @@ function renderLiveShape(shape, tile) {
   }, tile);
 }
 
-function renderLightingWall(wall, tile, selected = null, isLive = false) {
+function renderLightingWall(wall, tile, selected = null, isLive = false, selectedOverride = false) {
   const points = wallEndpoints(wall, tile);
-  const isSelected = selected?.type === 'wall' && selected.id === wall.id;
+  const isSelected = selectedOverride || (selected?.type === 'wall' && selected.id === wall.id);
   return (
     <g key={`wall-${wall.id}`} className={`${isLive ? 'live-light-wall' : 'lighting-wall'} ${isSelected ? 'selected-lighting-wall' : ''}`}>
       <line x1={points.x1} y1={points.y1} x2={points.x2} y2={points.y2} />
@@ -633,6 +792,57 @@ function renderLightingWall(wall, tile, selected = null, isLive = false) {
       <circle cx={points.x2} cy={points.y2} r="5" />
     </g>
   );
+}
+
+function renderDoor(door, tile, view, isSelected = false) {
+  const x = door.position.x * tile;
+  const y = door.position.y * tile;
+  const isOpen = door.state === 'open';
+  const isLocked = door.state === 'locked' || door.isLocked;
+  const rotation = door.edge?.orientation === 'v' ? 90 : 0;
+  return (
+    <g key={`door-${door.id}`} className={`door-icon door-${isLocked ? 'locked' : door.state} ${isSelected ? 'selected-door' : ''}`} transform={`translate(${x} ${y}) rotate(${isOpen ? rotation + 28 : rotation})`}>
+      <title>{isLocked && view === 'player' ? 'Locked' : `Door: ${door.state}`}</title>
+      <rect x="-13" y="-5" width="26" height="10" rx="3" />
+      <circle cx="8" cy="0" r="2.2" />
+    </g>
+  );
+}
+
+function doorWall(door) {
+  const [start, end] = door.lightingSegment || [[0, 0], [0, 0]];
+  return {
+    id: `door-wall-${door.id}`,
+    start: { x: start[0], y: start[1] },
+    end: { x: end[0], y: end[1] },
+    freeform: true,
+    sourceType: 'door',
+  };
+}
+
+function marqueeBounds(drag) {
+  const x = Math.min(drag.start.x, drag.end.x);
+  const y = Math.min(drag.start.y, drag.end.y);
+  return { x, y, w: Math.abs(drag.end.x - drag.start.x), h: Math.abs(drag.end.y - drag.start.y) };
+}
+
+function selectablesInBounds(bounds, board, tokens, drawings, walls, doors) {
+  return [
+    ...tokens.map((token) => ({ type: 'token', id: token.id, bounds: selectableBounds(token, 'token') })),
+    ...drawings.map((drawing) => ({ type: 'drawing', id: drawing.id, bounds: selectableBounds(drawing, 'drawing') })),
+    ...walls.map((wall) => ({ type: 'wall', id: wall.id, bounds: selectableBounds(wall, 'wall') })),
+    ...doors.map((door) => ({ type: 'door', id: door.id, bounds: selectableBounds(door, 'door') })),
+  ]
+    .filter((item) => item.bounds && boundsOverlap(bounds, item.bounds))
+    .map(({ type, id }) => ({ type, id }));
+}
+
+function boundsOverlap(a, b) {
+  return a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y;
+}
+
+function isGroupEntityDrag(drag) {
+  return ['token', 'drawing', 'wall-move', 'door'].includes(drag?.type);
 }
 
 function renderRevealHole(reveal, tile, fill = 'black') {

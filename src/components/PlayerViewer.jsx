@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { BoardCanvas } from './BoardCanvas';
 import { Topbar } from './Topbar';
-import { getBoard } from '../lib/board';
+import { getBoard, updateActiveBoard } from '../lib/board';
 
-export function PlayerViewer({ state }) {
+export function PlayerViewer({ state, projectId, updateProjectState }) {
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
   const [showZoom, setShowZoom] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -50,6 +50,19 @@ export function PlayerViewer({ state }) {
   }
 
   const board = getBoard(state, state.playerBoardId);
+  const toggleDoor = (id) => {
+    if (!projectId || !updateProjectState) return;
+    updateProjectState(projectId, (current) => updateActiveBoard(
+      { ...current, activeBoardId: current.playerBoardId },
+      (active) => ({
+        ...active,
+        doors: (active.doors || []).map((door) => {
+          if (door.id !== id || door.state === 'locked' || door.isLocked) return door;
+          return { ...door, state: door.state === 'open' ? 'closed' : 'open' };
+        }),
+      }),
+    ));
+  };
 
   return (
     <section className={`player-screen ${isFullscreen ? 'fullscreen-active' : ''}`}>
@@ -68,7 +81,7 @@ export function PlayerViewer({ state }) {
           <span>{Math.round(zoom * 100)}%</span>
         </div>
       )}
-      <BoardCanvas board={board} view="player" tool="viewer" fitToViewport playerZoom={zoom} playerRotation={rotation} />
+      <BoardCanvas board={board} view="player" tool="viewer" fitToViewport playerZoom={zoom} playerRotation={rotation} onToggleDoor={toggleDoor} />
       {state.diceRoll && <DiceOverlay roll={state.diceRoll} />}
     </section>
   );

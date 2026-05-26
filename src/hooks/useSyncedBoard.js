@@ -152,6 +152,33 @@ export function useSyncedBoard() {
     commitPayload(payload);
   };
 
+  const deleteBoard = async (projectId, boardId) => {
+    if (!projectId || !boardId) return { ok: false, error: 'No board selected.' };
+    setError('');
+    const response = await fetch(`/api/projects/${projectId}/boards/${boardId}`, { method: 'DELETE' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload.error || 'Unable to delete board.';
+      setError(message);
+      return { ok: false, error: message };
+    }
+    if (selectedProjectIdRef.current === projectId) {
+      setPast([]);
+      setFuture([]);
+    }
+    commitPayload(payload);
+    return { ok: true };
+  };
+
+  const updateProjectState = (projectId, updater) => {
+    const project = projectsRef.current.find((item) => item.id === projectId);
+    if (!project) return;
+    const nextState = migrateState(typeof updater === 'function' ? updater(project.state) : updater);
+    const updatedProject = { ...project, state: nextState, updatedAt: new Date().toISOString() };
+    setProjects((items) => items.map((item) => item.id === updatedProject.id ? updatedProject : item));
+    persistProject(updatedProject);
+  };
+
   const importProject = async (file, options = {}) => {
     if (!file) return { ok: false };
     setError('');
@@ -237,8 +264,10 @@ export function useSyncedBoard() {
     leaveProject,
     renameProject,
     deleteProject,
+    deleteBoard,
     importProject,
     publishProjectToPlayers,
+    updateProjectState,
     undo,
     redo,
     canUndo: past.length > 0,

@@ -144,13 +144,35 @@ export function dungeonToBoard(dungeon) {
         })),
     },
     tokens: [],
+    doors: normalized.tiles
+      .filter((tile) => tile.type === 'door' && tile.edge)
+      .map((door) => doorToBoardDoor(door)),
     drawings: terrainToDrawings(normalized),
     dungeonMetadata: {
       dungeonId: normalized.id,
       terrain: normalized.terrain,
       tiles: normalized.tiles,
+      doors: normalized.tiles
+        .filter((tile) => tile.type === 'door' && tile.edge)
+        .map((door) => doorToBoardDoor(door)),
       lightingGeometry: normalized.lightingGeometry,
     },
+  };
+}
+
+function doorToBoardDoor(door) {
+  const points = edgePoints(door.edge);
+  return {
+    id: door.id || uid('door'),
+    type: 'door',
+    position: {
+      x: ((points[0][0] + points[1][0]) / 2) / dungeonTileSize,
+      y: ((points[0][1] + points[1][1]) / 2) / dungeonTileSize,
+    },
+    edge: door.edge,
+    state: door.state || 'closed',
+    isLocked: door.state === 'locked',
+    lightingSegment: points.map(([x, y]) => [x / dungeonTileSize, y / dungeonTileSize]),
   };
 }
 

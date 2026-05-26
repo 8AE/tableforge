@@ -31,10 +31,10 @@ import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
 import { ToolGrid } from './ToolGrid';
 import { Topbar } from './Topbar';
-import { boxesOverlap, defaultLighting, getBoard, makeBoard, normalizeLibraryToken, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
+import { boxesOverlap, defaultLighting, getBoard, getBoardEntity, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
 import { dungeonToBoard, normalizeDungeon } from '../lib/dungeon';
 
-export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
+export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
   const [tool, setTool] = useState('select');
   const [activeLayer, setActiveLayer] = useState('player');
   const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1 });
@@ -62,6 +62,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [assetError, setAssetError] = useState('');
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
   const [isDungeonImportOpen, setIsDungeonImportOpen] = useState(false);
+  const [boardDeleteTarget, setBoardDeleteTarget] = useState(null);
+  const [boardDeleteName, setBoardDeleteName] = useState('');
+  const [boardDeleteError, setBoardDeleteError] = useState('');
   const [dungeonLibrary, setDungeonLibrary] = useState([]);
   const [dungeonImportError, setDungeonImportError] = useState('');
   const board = getBoard(state, state.activeBoardId);
@@ -94,6 +97,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
       drawings: active.drawings.map((drawing) => drawing.id === id ? { ...drawing, ...patch, fill: patch.color ? `${patch.color}22` : drawing.fill } : drawing),
+    })));
+  };
+  const updateDoor = (id, patch) => {
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      doors: (active.doors || []).map((door) => door.id === id ? mergeDoorPatch(door, patch) : door),
     })));
   };
   const updateTokenLibrary = (updater) => {
@@ -391,6 +400,23 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     setState((current) => ({ ...current, boards: [...current.boards, next], activeBoardId: next.id }));
   };
 
+  const requestDeleteBoard = (item) => {
+    setBoardDeleteTarget(item);
+    setBoardDeleteName('');
+    setBoardDeleteError('');
+  };
+
+  const confirmDeleteBoard = async () => {
+    if (!boardDeleteTarget || boardDeleteName.trim() !== boardDeleteTarget.name) return;
+    const result = await deleteBoard?.(openProjectId, boardDeleteTarget.id);
+    if (result?.ok === false) {
+      setBoardDeleteError(result.error || 'Unable to delete board.');
+      return;
+    }
+    setBoardDeleteTarget(null);
+    setBoardDeleteName('');
+  };
+
   const showBoardToPlayers = () => {
     setState((current) => ({ ...current, playerBoardId: current.activeBoardId }), { skipHistory: true });
     window.setTimeout(() => publishProjectToPlayers(openProjectId), 320);
@@ -413,13 +439,50 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       ...active,
       lighting: {
         ...{ ...defaultLighting, ...active.lighting },
-        walls: [...(active.lighting?.walls || []), wall],
+        walls: [...(active.lighting?.walls || []), normalizeWall(wall)],
       },
     })));
   };
 
+  const addDoor = (door) => {
+    const edgeKey = (edge) => `${edge?.x},${edge?.y},${edge?.orientation}`;
+    setState((current) => updateActiveBoard(current, (active) => {
+      const normalizedDoor = normalizeDoors([door])[0];
+      const existing = (active.doors || []).find((item) => edgeKey(item.edge) === edgeKey(normalizedDoor.edge));
+      if (existing) {
+        return {
+          ...active,
+          doors: (active.doors || []).map((item) => item.id === existing.id ? { ...item, state: 'closed', isLocked: false } : item),
+        };
+      }
+      return {
+        ...active,
+        doors: [...(active.doors || []), normalizedDoor],
+      };
+    }));
+    setSelected(null);
+  };
+
   const moveLightWall = (id, wall) => {
     updateLighting({ walls: (board.lighting?.walls || []).map((item) => item.id === id ? wall : item) });
+  };
+
+  const moveDoor = (id, door) => {
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      doors: (active.doors || []).map((item) => item.id === id ? door : item),
+    })));
+  };
+
+  const toggleDoor = (id) => {
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      doors: (active.doors || []).map((door) => {
+        if (door.id !== id) return door;
+        if (door.state === 'locked' || door.isLocked) return door;
+        return { ...door, state: door.state === 'open' ? 'closed' : 'open' };
+      }),
+    })));
   };
 
   const removeLightReveal = (area) => {
@@ -445,6 +508,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     const amount = selected.type === 'wall' ? 0.2 : 1;
     if (selected.type === 'token' && selectedToken) updateToken(selected.id, { x: Math.max(0, selectedToken.x + dx * amount), y: Math.max(0, selectedToken.y + dy * amount) });
     if (selected.type === 'drawing' && selectedDrawing) updateDrawing(selected.id, offsetDrawing(selectedDrawing, dx * amount, dy * amount));
+    if (selected.type === 'door' && selectedDoor) updateDoor(selected.id, offsetEntity(selectedDoor, 'door', dx * amount, dy * amount));
     if (selected.type === 'wall') {
       updateLighting({
         walls: (board.lighting?.walls || []).map((wall) => wall.id === selected.id
@@ -458,12 +522,53 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     }
   };
 
+  const selectedItems = selected?.type === 'multi' ? selected.items : selected ? [selected] : [];
+
+  const moveSelection = (items, dx, dy) => {
+    if (!items?.length) return;
+    const tokenIds = new Set(items.filter((item) => item.type === 'token').map((item) => item.id));
+    const drawingIds = new Set(items.filter((item) => item.type === 'drawing').map((item) => item.id));
+    const wallIds = new Set(items.filter((item) => item.type === 'wall').map((item) => item.id));
+    const doorIds = new Set(items.filter((item) => item.type === 'door').map((item) => item.id));
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      tokens: active.tokens.map((token) => tokenIds.has(token.id) ? offsetEntity(token, 'token', dx, dy) : token),
+      drawings: active.drawings.map((drawing) => drawingIds.has(drawing.id) ? offsetEntity(drawing, 'drawing', dx, dy) : drawing),
+      doors: (active.doors || []).map((door) => doorIds.has(door.id) ? offsetEntity(door, 'door', dx, dy) : door),
+      lighting: {
+        ...defaultLighting,
+        ...active.lighting,
+        walls: (active.lighting?.walls || []).map((wall) => wallIds.has(wall.id)
+          ? {
+              ...wall,
+              start: { x: wall.start.x + dx, y: wall.start.y + dy },
+              end: { x: wall.end.x + dx, y: wall.end.y + dy },
+            }
+          : wall),
+      },
+    })));
+  };
+
+  const selectMultiple = (items, mode = 'replace') => {
+    const keyFor = (item) => `${item.type}:${item.id}`;
+    const currentItems = selectedItems;
+    let nextItems = items;
+    if (mode === 'add') {
+      const merged = new Map(currentItems.map((item) => [keyFor(item), item]));
+      items.forEach((item) => merged.set(keyFor(item), item));
+      nextItems = [...merged.values()];
+    }
+    if (mode === 'subtract') {
+      const remove = new Set(items.map(keyFor));
+      nextItems = currentItems.filter((item) => !remove.has(keyFor(item)));
+    }
+    if (nextItems.length === 0) setSelected(null);
+    else if (nextItems.length === 1) setSelected(nextItems[0]);
+    else setSelected({ type: 'multi', items: nextItems });
+  };
+
   const copySelection = () => {
-    const item = selected?.type === 'token'
-      ? board.tokens.find((token) => token.id === selected.id)
-      : selected?.type === 'drawing'
-        ? board.drawings.find((drawing) => drawing.id === selected.id)
-        : board.lighting?.walls?.find((wall) => wall.id === selected?.id);
+    const item = getBoardEntity(board, selected);
     if (item) setClipboard({ type: selected.type, item: structuredClone(item) });
   };
 
@@ -479,16 +584,27 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
       setSelected({ type: 'drawing', id: drawing.id });
     }
+    if (clipboard.type === 'door') {
+      const door = { ...offsetEntity(clipboard.item, 'door', 1, 1), id: uid('door') };
+      setState((current) => updateActiveBoard(current, (active) => ({ ...active, doors: [...(active.doors || []), door] })));
+      setSelected({ type: 'door', id: door.id });
+    }
   };
 
   const deleteSelection = (target = selected) => {
     if (!target) return;
+    const targets = target.type === 'multi' ? target.items : [target];
+    const tokenIds = new Set(targets.filter((item) => item.type === 'token').map((item) => item.id));
+    const drawingIds = new Set(targets.filter((item) => item.type === 'drawing').map((item) => item.id));
+    const wallIds = new Set(targets.filter((item) => item.type === 'wall').map((item) => item.id));
+    const doorIds = new Set(targets.filter((item) => item.type === 'door').map((item) => item.id));
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
-      tokens: target.type === 'token' ? active.tokens.filter((token) => token.id !== target.id) : active.tokens,
-      drawings: target.type === 'drawing' ? active.drawings.filter((drawing) => drawing.id !== target.id) : active.drawings,
-      lighting: target.type === 'wall'
-        ? { ...defaultLighting, ...active.lighting, walls: (active.lighting?.walls || []).filter((wall) => wall.id !== target.id) }
+      tokens: tokenIds.size ? active.tokens.filter((token) => !tokenIds.has(token.id)) : active.tokens,
+      drawings: drawingIds.size ? active.drawings.filter((drawing) => !drawingIds.has(drawing.id)) : active.drawings,
+      doors: doorIds.size ? (active.doors || []).filter((door) => !doorIds.has(door.id)) : active.doors,
+      lighting: wallIds.size
+        ? { ...defaultLighting, ...active.lighting, walls: (active.lighting?.walls || []).filter((wall) => !wallIds.has(wall.id)) }
         : active.lighting,
     })));
     setSelected(null);
@@ -525,11 +641,25 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       })));
       setSelected({ type: 'wall', id: wall.id });
     }
+    if (target.type === 'door') {
+      const source = board.doors?.find((door) => door.id === target.id);
+      if (!source) return;
+      const door = { ...offsetEntity(structuredClone(source), 'door', 1, 1), id: uid('door') };
+      setState((current) => updateActiveBoard(current, (active) => ({ ...active, doors: [...(active.doors || []), door] })));
+      setSelected({ type: 'door', id: door.id });
+    }
+  };
+
+  const moveDoorToPosition = (door, position) => {
+    const dx = Number(position.x) - door.position.x;
+    const dy = Number(position.y) - door.position.y;
+    updateDoor(door.id, offsetEntity(door, 'door', dx, dy));
   };
 
   const selectedDrawing = selected?.type === 'drawing' ? board.drawings.find((drawing) => drawing.id === selected.id) : null;
   const selectedToken = selected?.type === 'token' ? board.tokens.find((token) => token.id === selected.id) : null;
   const selectedWall = selected?.type === 'wall' ? board.lighting?.walls?.find((wall) => wall.id === selected.id) : null;
+  const selectedDoor = selected?.type === 'door' ? board.doors?.find((door) => door.id === selected.id) : null;
   const sidebarTabs = [
     ['campaign', 'Campaign'],
     ['map', 'Map'],
@@ -538,7 +668,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     ['settings', 'Settings'],
   ];
   const quickMapTools = [
-    ['select', <MousePointer2 size={17} />, 'Move Tokens'],
+    ['select', <MousePointer2 size={17} />, 'Select & Move'],
     ['ruler', <Ruler size={17} />, 'Measuring Tool'],
     ['draw', <Brush size={17} />, 'Drawing Tool'],
     ['light', <Lightbulb size={17} />, 'Lighting & Vision'],
@@ -558,7 +688,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       const arrowDelta = arrowDeltas[event.key.toLowerCase()];
       if (arrowDelta && selected) {
         event.preventDefault();
-        nudgeSelection(arrowDelta[0], arrowDelta[1]);
+        if (selected.type === 'multi') moveSelection(selected.items, arrowDelta[0], arrowDelta[1]);
+        else nudgeSelection(arrowDelta[0], arrowDelta[1]);
         return;
       }
       if (['backspace', 'delete'].includes(event.key.toLowerCase()) && selected) {
@@ -589,7 +720,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [board, selected, selectedToken, selectedDrawing, clipboard, undo, redo]);
+  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo]);
 
   return (
     <>
@@ -633,6 +764,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             drawColor={drawColor}
             onAddToken={addToken}
             onMoveToken={(id, point) => updateToken(id, point)}
+            onMoveSelection={moveSelection}
+            onAddDoor={addDoor}
+            onMoveDoor={moveDoor}
             onMoveDrawing={(id, dx, dy) => updateDrawing(id, offsetDrawing(board.drawings.find((drawing) => drawing.id === id), dx, dy))}
             onAddDrawing={addDrawing}
             onMoveBackground={(patch) => updateBackground(patch)}
@@ -641,6 +775,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             onMoveLightWall={moveLightWall}
             onRemoveLightReveal={removeLightReveal}
             onLiveMeasurement={updateLiveMeasurement}
+            onSelectMultiple={selectMultiple}
+            onToggleDoor={toggleDoor}
             onDeleteSelection={deleteSelection}
             onDuplicateSelection={duplicateSelection}
           />
@@ -726,14 +862,23 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         <Panel title="Boards" icon={<Layers size={16} />}>
           <div className="board-list">
             {state.boards.map((item) => (
-              <button
-                key={item.id}
-                className={item.id === state.activeBoardId ? 'active' : ''}
-                onClick={() => setState((current) => ({ ...current, activeBoardId: item.id }), { skipHistory: true })}
-              >
-                <span>{item.name}</span>
-                {item.id === state.playerBoardId && <Users size={15} />}
-              </button>
+              <div className={`board-list-item ${item.id === state.activeBoardId ? 'active' : ''}`} key={item.id}>
+                <button
+                  className="board-switch"
+                  onClick={() => setState((current) => ({ ...current, activeBoardId: item.id }), { skipHistory: true })}
+                >
+                  <span>{item.name}</span>
+                  {item.id === state.playerBoardId && <Users size={15} />}
+                </button>
+                <button
+                  className="danger-icon"
+                  title={`Delete ${item.name}`}
+                  disabled={state.boards.length <= 1}
+                  onClick={() => requestDeleteBoard(item)}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
             ))}
           </div>
           <div className="split">
@@ -885,6 +1030,37 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <div className="shortcut-row">
               <button className="command" title="Duplicate the selected light-blocking wall" onClick={() => duplicateSelection()}><Copy size={16} /> Duplicate</button>
               <button className="command danger" title="Delete the selected light-blocking wall" onClick={() => deleteSelection()}><Trash2 size={16} /> Delete</button>
+            </div>
+          </Panel>
+        )}
+
+        {selectedDoor && (
+          <Panel title="Selected Door" icon={<MousePointer2 size={16} />}>
+            <div className="split">
+              <label>
+                X center
+                <input type="number" step="0.5" value={selectedDoor.position.x} onChange={(event) => moveDoorToPosition(selectedDoor, { x: Number(event.target.value), y: selectedDoor.position.y })} />
+              </label>
+              <label>
+                Y center
+                <input type="number" step="0.5" value={selectedDoor.position.y} onChange={(event) => moveDoorToPosition(selectedDoor, { x: selectedDoor.position.x, y: Number(event.target.value) })} />
+              </label>
+            </div>
+            <label>
+              Door state
+              <select value={selectedDoor.state} onChange={(event) => updateDoor(selectedDoor.id, { state: event.target.value })}>
+                <option value="closed">Closed</option>
+                <option value="open">Open</option>
+                <option value="locked">Locked</option>
+              </select>
+            </label>
+            <label className="check-row">
+              <input type="checkbox" checked={selectedDoor.state === 'locked' || selectedDoor.isLocked} onChange={(event) => updateDoor(selectedDoor.id, { isLocked: event.target.checked })} />
+              Locked
+            </label>
+            <div className="shortcut-row">
+              <button className="command" title="Duplicate the selected door" onClick={() => duplicateSelection()}><Copy size={16} /> Duplicate</button>
+              <button className="command danger" title="Delete the selected door" onClick={() => deleteSelection()}><Trash2 size={16} /> Delete</button>
             </div>
           </Panel>
         )}
@@ -1307,6 +1483,28 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         </div>
       )}
 
+      {boardDeleteTarget && (
+        <div className="project-conflict-overlay" role="dialog" aria-modal="true" aria-label="Delete board">
+          <div className="project-conflict-modal">
+            <strong>Delete Board</strong>
+            <p>
+              Are you sure you want to delete the board '{boardDeleteTarget.name}'? This will permanently erase all tokens, drawings, and configurations hosted on this map. This action is irreversible.
+            </p>
+            <label>
+              Type the board name to confirm
+              <input value={boardDeleteName} onChange={(event) => setBoardDeleteName(event.target.value)} autoFocus />
+            </label>
+            {boardDeleteError && <p className="form-error">{boardDeleteError}</p>}
+            <div className="project-conflict-actions">
+              <button className="command danger" disabled={boardDeleteName.trim() !== boardDeleteTarget.name} onClick={confirmDeleteBoard}>
+                Yes, Delete Permanently
+              </button>
+              <button className="command" onClick={() => setBoardDeleteTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </>
   );
 }
@@ -1314,6 +1512,19 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 function normalizeFiveEToolsBaseUrl(baseUrl = 'https://5e.tools/') {
   const trimmed = baseUrl.trim() || 'https://5e.tools/';
   return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+}
+
+function mergeDoorPatch(door, patch) {
+  const next = { ...door, ...patch };
+  if (patch.state) {
+    next.isLocked = patch.state === 'locked';
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'isLocked')) {
+    next.isLocked = Boolean(patch.isLocked);
+    if (next.isLocked) next.state = 'locked';
+    else if (door.state === 'locked') next.state = 'closed';
+  }
+  return next;
 }
 
 async function fetchBestiaryJson(url) {
