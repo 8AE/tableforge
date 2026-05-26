@@ -91,7 +91,6 @@ export function migrateState(raw) {
     return {
       ...raw,
       fiveEToolsBaseUrl: raw.fiveEToolsBaseUrl || 'https://5e.tools/',
-      diceRoll: raw.diceRoll || null,
       tokenLibrary: (raw.tokenLibrary || []).map((token) => normalizeLibraryToken(token)),
       boards: raw.boards.map((board) => ({
         ...board,

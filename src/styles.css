@@ -1277,90 +1277,6 @@ input[type="range"] {
   background: rgba(16, 20, 28, 0.92);
 }
 
-.dice-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 8;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-  animation: dice-overlay-fade 3.6s ease forwards;
-}
-
-.dice-overlay strong {
-  margin-top: 18px;
-  padding: 10px 16px;
-  border-radius: 8px;
-  background: rgba(8, 17, 31, 0.82);
-  color: #f8fafc;
-  font-size: 32px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
-}
-
-.dice-tray {
-  display: flex;
-  gap: 22px;
-  perspective: 900px;
-}
-
-.dice-cube {
-  width: 86px;
-  height: 86px;
-  display: grid;
-  place-items: center;
-  border: 3px solid rgba(255, 255, 255, 0.72);
-  border-radius: 14px;
-  background:
-    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.34), transparent 30%),
-    linear-gradient(135deg, #df5d52, #7f1d1d);
-  box-shadow: inset -14px -18px 28px rgba(0, 0, 0, 0.28), 0 24px 52px rgba(0, 0, 0, 0.48);
-  transform-style: preserve-3d;
-  animation: dice-roll 1.15s cubic-bezier(.16, .84, .25, 1) var(--delay) both;
-}
-
-.dice-d4 {
-  clip-path: polygon(50% 4%, 96% 92%, 4% 92%);
-}
-
-.dice-d6 {
-  clip-path: inset(0 round 14px);
-}
-
-.dice-d8 {
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-}
-
-.dice-d10 {
-  clip-path: polygon(50% 0, 92% 24%, 82% 84%, 50% 100%, 18% 84%, 8% 24%);
-}
-
-.dice-d12 {
-  clip-path: polygon(50% 0, 80% 10%, 100% 38%, 94% 72%, 68% 100%, 32% 100%, 6% 72%, 0 38%, 20% 10%);
-}
-
-.dice-d20 {
-  clip-path: polygon(50% 0, 90% 18%, 100% 62%, 72% 100%, 28% 100%, 0 62%, 10% 18%);
-}
-
-.dice-cube span {
-  color: #fff7ed;
-  font-size: 34px;
-  font-weight: 900;
-  text-shadow: 0 3px 8px rgba(0, 0, 0, 0.38);
-}
-
-@keyframes dice-roll {
-  0% {
-    transform: translate3d(-120px, -160px, 0) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(0.72);
-  }
-  72% {
-    transform: translate3d(16px, 18px, 0) rotateX(620deg) rotateY(420deg) rotateZ(270deg) scale(1.08);
-  }
-  100% {
-    transform: translate3d(0, 0, 0) rotateX(720deg) rotateY(540deg) rotateZ(360deg) scale(1);
-  }
-}
-
 @keyframes sidebar-panel-in {
   from {
     opacity: 0;
@@ -1369,15 +1285,6 @@ input[type="range"] {
   to {
     opacity: 1;
     transform: translateX(0);
-  }
-}
-
-@keyframes dice-overlay-fade {
-  0%, 78% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
   }
 }
 

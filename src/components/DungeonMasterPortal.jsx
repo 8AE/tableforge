@@ -40,7 +40,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1 });
   const [drawColor, setDrawColor] = useState('#36d399');
   const [drawLayer, setDrawLayer] = useState('player');
-  const [diceNotation, setDiceNotation] = useState('1d20');
   const [selected, setSelected] = useState(null);
   const [clipboard, setClipboard] = useState(null);
   const [tokensExpanded, setTokensExpanded] = useState(true);
@@ -117,15 +116,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const updateLiveMeasurement = (measurement) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, liveMeasurement: measurement })), { skipHistory: true });
   };
-  const rollDice = (notation = '1d20') => {
-    const match = notation.match(/^(\d*)d(\d+)$/i);
-    if (!match) return;
-    const count = Math.max(1, Math.min(20, Number(match?.[1] || 1)));
-    const sides = Number(match?.[2] || 20);
-    const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
-    setState((current) => ({ ...current, diceRoll: { id: uid('dice'), notation: `${count}d${sides}`, sides, rolls, total: rolls.reduce((sum, roll) => sum + roll, 0) } }), { skipHistory: true });
-  };
-
   const fetchProjectAssets = async () => {
     if (!openProjectId) return;
     try {
@@ -887,14 +877,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           </div>
           <button className="command accent" title="Publish the active board to the player viewer" onClick={showBoardToPlayers}><Send size={16} /> Show active board to players</button>
           <button className="command" title="Import a reusable dungeon map as a new board" onClick={openDungeonImport}><Library size={16} /> Import Dungeon Map</button>
-        </Panel>
-
-        <Panel title="Dice" icon={<Grid2X2 size={16} />}>
-          <label>
-            Dice notation
-            <input value={diceNotation} onChange={(event) => setDiceNotation(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') rollDice(diceNotation.trim()); }} placeholder="5d10" />
-          </label>
-          <button className="command accent" title="Roll dice on the player viewer" onClick={() => rollDice(diceNotation.trim())}>Roll dice</button>
         </Panel>
             </div>
           )}

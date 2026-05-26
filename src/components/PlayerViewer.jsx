@@ -82,27 +82,6 @@ export function PlayerViewer({ state, projectId, updateProjectState }) {
         </div>
       )}
       <BoardCanvas board={board} view="player" tool="viewer" fitToViewport playerZoom={zoom} playerRotation={rotation} onToggleDoor={toggleDoor} />
-      {state.diceRoll && <DiceOverlay roll={state.diceRoll} />}
     </section>
   );
-}
-
-function DiceOverlay({ roll }) {
-  return (
-    <div className="dice-overlay" key={roll.id}>
-      <div className="dice-tray">
-        {roll.rolls.map((value, index) => (
-          <div className={`dice-cube dice-d${diceShape(roll.sides)}`} key={`${roll.id}-${index}`} style={{ '--delay': `${index * 90}ms` }}>
-            <span>{value}</span>
-          </div>
-        ))}
-      </div>
-      <strong>{roll.notation}: {roll.total}</strong>
-    </div>
-  );
-}
-
-function diceShape(sides) {
-  if ([4, 6, 8, 10, 12, 20].includes(Number(sides))) return Number(sides);
-  return 20;
 }
