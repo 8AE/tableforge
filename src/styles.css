@@ -1988,6 +1988,19 @@ button.dungeon-thumb {
   grid-template-rows: auto auto 1fr;
 }
 
+.map-import-modal {
+  width: min(760px, 100%);
+  grid-template-rows: auto 1fr;
+}
+
+.map-import-modal .map-import {
+  margin: 0;
+}
+
+.map-import-modal .map-results {
+  max-height: min(420px, 48vh);
+}
+
 .danger-text {
   border-color: rgba(223, 93, 82, 0.45) !important;
   color: #ffb4aa !important;

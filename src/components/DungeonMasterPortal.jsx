@@ -66,6 +66,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [assetError, setAssetError] = useState('');
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
   const [isDungeonImportOpen, setIsDungeonImportOpen] = useState(false);
+  const [isFiveEToolsMapImportOpen, setIsFiveEToolsMapImportOpen] = useState(false);
   const [boardDeleteTarget, setBoardDeleteTarget] = useState(null);
   const [boardDeleteError, setBoardDeleteError] = useState('');
   const [dungeonLibrary, setDungeonLibrary] = useState([]);
@@ -329,13 +330,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const importMap = (map) => {
     const dimensions = getMapBoardDimensions(map);
     const importedWalls = getMapRegionWalls(map, dimensions);
-    setState((current) => updateActiveBoard(current, (active) => ({
-      ...active,
-      name: map.displayTitle || active.name,
+    const nextBoard = {
+      ...makeBoard(map.displayTitle || 'Imported Map'),
+      name: map.displayTitle || 'Imported Map',
       columns: dimensions.columns,
       rows: dimensions.rows,
       background: {
-        ...active.background,
         src: map.imageUrl,
         x: 0,
         y: 0,
@@ -345,10 +345,18 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       },
       lighting: {
         ...defaultLighting,
-        ...active.lighting,
         walls: importedWalls,
       },
-    })));
+      doors: [],
+      tokens: [],
+      drawings: [],
+    };
+    setState((current) => ({
+      ...current,
+      boards: [...current.boards, nextBoard],
+      activeBoardId: nextBoard.id,
+    }));
+    setIsFiveEToolsMapImportOpen(false);
     setMapImportError('');
     setMapResults([]);
     setMapQuery(map.displayTitle);
@@ -773,6 +781,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onBoardSelect={(id) => setState((current) => ({ ...current, activeBoardId: id }), { skipHistory: true })}
           onAddBoard={addBoard}
           onImportBoard={openDungeonImport}
+          onImportFiveEToolsMap={() => {
+            setMapImportError('');
+            setIsFiveEToolsMapImportOpen(true);
+          }}
           onDuplicateBoard={duplicateBoard}
           onDeleteBoard={requestDeleteBoard}
           onPublishBoard={showBoardToPlayers}
@@ -1013,38 +1025,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               </div>
             </details>
           )}
-          <div className="map-import">
-            <label>
-              5e.tools base URL
-              <input value={state.fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => updateFiveEToolsBaseUrl(event.target.value)} />
-            </label>
-            <label>
-              Import from 5e.tools
-              <input value={mapQuery} onChange={(event) => setMapQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchMaps(); }} placeholder="Cragmaw Hideout, Castle Ravenloft..." />
-            </label>
-            <button className="command" title="Search the 5e.tools maps gallery" onClick={searchMaps} disabled={isSearchingMaps}>
-              <Library size={16} /> {isSearchingMaps ? 'Searching...' : 'Search maps'}
-            </button>
-            {mapImportError && <p className="form-error">{mapImportError}</p>}
-            {mapResults.length > 0 && (
-              <div className="map-results">
-                {mapResults.map((map) => {
-                  const dimensions = getMapBoardDimensions(map);
-                  return (
-                    <div className="map-result" key={map.id}>
-                      <div>
-                        <strong>{map.displayTitle}</strong>
-                        <span>{map.sourceName} · {map.chapterName} · {dimensions.columns} x {dimensions.rows}</span>
-                      </div>
-                      <button className="command" title="Use this map as the active board background" onClick={() => importMap(map)}>
-                        <Image size={15} /> Import
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
           <label className="check-row" title="Keep the background image stretched to the board's full width and height">
             <input type="checkbox" checked={Boolean(board.background.fitToBoard)} onChange={(event) => toggleBackgroundFit(event.target.checked)} />
             Fit background to board
@@ -1541,6 +1521,52 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                 </article>
               ))}
               {!dungeonLibrary.length && <div className="library-empty"><strong>No dungeons found</strong><span>Create one from the Dungeon Builder first.</span></div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isFiveEToolsMapImportOpen && (
+        <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Import map from 5e.tools">
+          <div className="library-modal map-import-modal">
+            <header className="library-modal-header">
+              <div>
+                <strong>Import Map from 5e.tools</strong>
+                <span>Search the map gallery and create a new board from the selected result.</span>
+              </div>
+              <button title="Close map import" onClick={() => setIsFiveEToolsMapImportOpen(false)}><X size={18} /></button>
+            </header>
+            <div className="map-import">
+              <label>
+                5e.tools base URL
+                <input value={state.fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => updateFiveEToolsBaseUrl(event.target.value)} />
+              </label>
+              <label>
+                Search maps
+                <input value={mapQuery} onChange={(event) => setMapQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchMaps(); }} placeholder="Cragmaw Hideout, Castle Ravenloft..." autoFocus />
+              </label>
+              <button className="command" title="Search the 5e.tools maps gallery" onClick={searchMaps} disabled={isSearchingMaps}>
+                <Library size={16} /> {isSearchingMaps ? 'Searching...' : 'Search maps'}
+              </button>
+              {mapImportError && <p className="form-error">{mapImportError}</p>}
+              {mapResults.length > 0 && (
+                <div className="map-results">
+                  {mapResults.map((map) => {
+                    const dimensions = getMapBoardDimensions(map);
+                    return (
+                      <div className="map-result" key={map.id}>
+                        <div>
+                          <strong>{map.displayTitle}</strong>
+                          <span>{map.sourceName} · {map.chapterName} · {dimensions.columns} x {dimensions.rows}</span>
+                        </div>
+                        <button className="command" title="Create a new board from this map" onClick={() => importMap(map)}>
+                          <Image size={15} /> Import
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>

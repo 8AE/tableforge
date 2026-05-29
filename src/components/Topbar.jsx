@@ -20,6 +20,7 @@ export function Topbar({
   onBoardSelect,
   onAddBoard,
   onImportBoard,
+  onImportFiveEToolsMap,
   onDuplicateBoard,
   onDeleteBoard,
   onPublishBoard,
@@ -111,6 +112,7 @@ export function Topbar({
               <div className="add-page-actions">
                 <button type="button" onClick={onAddBoard}>Blank Board</button>
                 <button type="button" onClick={onImportBoard}>Import from Dungeon Builder</button>
+                <button type="button" onClick={onImportFiveEToolsMap}>Import from 5e.tools</button>
               </div>
             </article>
           </div>
