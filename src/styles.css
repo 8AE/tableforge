@@ -1679,15 +1679,28 @@ input[type="range"] {
 
 .empty-player,
 .project-launcher {
+  width: 100%;
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 24px;
 }
 
+.project-launcher {
+  position: relative;
+  padding-bottom: 72px;
+}
+
+.project-launcher-content {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
 .empty-player > div,
 .project-card {
-  width: min(560px, 100%);
+  width: 100%;
   display: grid;
   gap: 14px;
   padding: 22px;
@@ -1755,6 +1768,37 @@ input[type="range"] {
 
 .project-import-button input {
   display: none;
+}
+
+.project-github-link {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: #f5f3ed;
+  text-decoration: none;
+  border: 1px solid rgba(245, 243, 237, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.project-github-link:hover {
+  border-color: rgba(54, 211, 153, 0.36);
+  background: rgba(54, 211, 153, 0.12);
+}
+
+.project-build-info {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 18px;
+  color: #8f8879;
+  font-size: 12px;
+  text-align: center;
 }
 
 .project-builder-button {

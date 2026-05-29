@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { Github } from 'lucide-react';
 import { DungeonBuilder } from './components/DungeonBuilder';
 import { DungeonMasterPortal } from './components/DungeonMasterPortal';
 import { PlayerViewer } from './components/PlayerViewer';
 import { useSyncedBoard } from './hooks/useSyncedBoard';
+
+const appVersion = __APP_VERSION__;
+const gitCommit = __GIT_COMMIT__;
 
 export function App() {
   const {
@@ -115,44 +119,60 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
 
   return (
     <section className="project-launcher">
-      <div className="project-card">
-        <div className="project-card-header">
-          <div>
-            <strong>Open a project</strong>
-            <span>Projects are saved on this host machine and shared with connected players.</span>
-          </div>
-          <button className="project-builder-button" onClick={onOpenDungeonBuilder}>Dungeon & Map Builder</button>
-          <label className="project-import-button">
-            Import Campaign
-            <input type="file" accept=".zip,application/zip" onChange={handleImportChange} disabled={isImporting} />
-          </label>
-        </div>
-        {isLoading && <p>Loading projects...</p>}
-        {error && <p className="form-error">{error}</p>}
-        {importMessage && <p className={importMessage.includes('imported') ? 'form-success' : 'form-error'}>{importMessage}</p>}
-        <div className="project-list">
-          {projects.map((project) => (
-            <div className="project-row" key={project.id}>
-              {editingId === project.id ? (
-                <input value={editingName} onChange={(event) => setEditingName(event.target.value)} />
-              ) : (
-                <button onClick={() => onOpenProject(project.id)}>{project.name}</button>
-              )}
-              {editingId === project.id ? (
-                <button onClick={() => { onRenameProject(project.id, editingName); setEditingId(null); }}>Save</button>
-              ) : (
-                <button onClick={() => { setEditingId(project.id); setEditingName(project.name); }}>Rename</button>
-              )}
-              <a href={`/api/projects/${encodeURIComponent(project.id)}/export`} download={`${project.name}.zip`}>Export</a>
-              <button className="danger-text" onClick={() => onDeleteProject(project.id)}>Delete</button>
+      <div className="project-launcher-content">
+        <div className="project-card">
+          <div className="project-card-header">
+            <div>
+              <strong>Open a project</strong>
+              <span>Projects are saved on this host machine and shared with connected players.</span>
             </div>
-          ))}
+            <button className="project-builder-button" onClick={onOpenDungeonBuilder}>Dungeon & Map Builder</button>
+            <label className="project-import-button">
+              Import Campaign
+              <input type="file" accept=".zip,application/zip" onChange={handleImportChange} disabled={isImporting} />
+            </label>
+          </div>
+          {isLoading && <p>Loading projects...</p>}
+          {error && <p className="form-error">{error}</p>}
+          {importMessage && <p className={importMessage.includes('imported') ? 'form-success' : 'form-error'}>{importMessage}</p>}
+          <div className="project-list">
+            {projects.map((project) => (
+              <div className="project-row" key={project.id}>
+                {editingId === project.id ? (
+                  <input value={editingName} onChange={(event) => setEditingName(event.target.value)} />
+                ) : (
+                  <button onClick={() => onOpenProject(project.id)}>{project.name}</button>
+                )}
+                {editingId === project.id ? (
+                  <button onClick={() => { onRenameProject(project.id, editingName); setEditingId(null); }}>Save</button>
+                ) : (
+                  <button onClick={() => { setEditingId(project.id); setEditingName(project.name); }}>Rename</button>
+                )}
+                <a href={`/api/projects/${encodeURIComponent(project.id)}/export`} download={`${project.name}.zip`}>Export</a>
+                <button className="danger-text" onClick={() => onDeleteProject(project.id)}>Delete</button>
+              </div>
+            ))}
+          </div>
+          <div className="project-create">
+            <input value={name} onChange={(event) => setName(event.target.value)} />
+            <button onClick={() => onCreateProject(name || 'New Campaign')}>Create project</button>
+          </div>
         </div>
-        <div className="project-create">
-          <input value={name} onChange={(event) => setName(event.target.value)} />
-          <button onClick={() => onCreateProject(name || 'New Campaign')}>Create project</button>
-        </div>
+
       </div>
+      <a
+        className="project-github-link"
+        href="https://github.com/8AE/tableforge"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Open Tableforge on GitHub"
+        title="Open Tableforge on GitHub"
+      >
+        <Github size={20} />
+      </a>
+      <footer className="project-build-info">
+        v{appVersion} · {gitCommit}
+      </footer>
       {importConflict && (
         <div className="project-conflict-overlay" role="dialog" aria-modal="true" aria-label="Project import conflict">
           <div className="project-conflict-modal">
