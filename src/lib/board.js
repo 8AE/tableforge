@@ -3,7 +3,7 @@ export const CHANNEL_KEY = 'tableforge-board-sync';
 export const tileFeet = 5;
 export const defaultLighting = {
   enabled: false,
-  darkness: 0.86,
+  darkness: 1,
   snapWallsToGrid: true,
   reveals: [],
   hiddenReveals: [],

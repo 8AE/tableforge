@@ -116,6 +116,13 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       lighting: { ...defaultLighting, ...active.lighting, ...patch },
     })));
   };
+  const toggleLighting = (enabled) => {
+    const currentDarkness = board.lighting?.darkness;
+    updateLighting({
+      enabled,
+      ...(enabled && (currentDarkness == null || currentDarkness === 0.86) ? { darkness: defaultLighting.darkness } : {}),
+    });
+  };
   const updateToken = (id, patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({
       ...active,
@@ -1027,12 +1034,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
         <Panel title="Lighting" icon={<EyeOff size={16} />}>
           <label className="check-row" title="Darken the player board and reveal only lit areas">
-            <input type="checkbox" checked={Boolean(board.lighting?.enabled)} onChange={(event) => updateLighting({ enabled: event.target.checked })} />
+            <input type="checkbox" checked={Boolean(board.lighting?.enabled)} onChange={(event) => toggleLighting(event.target.checked)} />
             Enable board lighting
           </label>
           <label title="How dark unrevealed player areas should be">
             Darkness
-            <input type="range" min="0.35" max="0.98" step="0.01" value={board.lighting?.darkness ?? 0.86} onChange={(event) => updateLighting({ darkness: Number(event.target.value) })} />
+            <input type="range" min="0.35" max="1" step="0.01" value={board.lighting?.darkness ?? defaultLighting.darkness} onChange={(event) => updateLighting({ darkness: Number(event.target.value) })} />
           </label>
           <label className="check-row" title="When disabled, wall endpoints can be placed anywhere on the map">
             <input type="checkbox" checked={board.lighting?.snapWallsToGrid !== false} onChange={(event) => updateLighting({ snapWallsToGrid: event.target.checked })} />
