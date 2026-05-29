@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Expand, Plus, RotateCcw, RotateCw, Search, Settings, Trash2, Users } from 'lucide-react';
+import { Copy, Expand, Home, Plus, RotateCcw, RotateCw, Search, Settings, Trash2, Users } from 'lucide-react';
 import { tileFeet } from '../lib/board';
 
 const layerOptions = [
@@ -24,6 +24,7 @@ export function Topbar({
   onDuplicateBoard,
   onDeleteBoard,
   onPublishBoard,
+  onProjectHome,
   onFullscreen,
   onToggleZoom,
   onRotateLeft,
@@ -71,14 +72,20 @@ export function Topbar({
       </div>
       {mode === 'dm' && isDrawerOpen && (
         <div className="page-drawer" aria-label="Board page drawer">
-          <div
-            className="player-ribbon"
-            draggable
-            onDragStart={(event) => event.dataTransfer.setData('text/plain', 'player-ribbon')}
-            title="Drag onto a board to publish it to players"
-          >
-            <Users size={16} />
-            PLAYERS
+          <div className="page-drawer-rail">
+            <button className="drawer-home-button" type="button" onClick={onProjectHome}>
+              <Home size={16} />
+              Project home
+            </button>
+            <div
+              className="player-ribbon"
+              draggable
+              onDragStart={(event) => event.dataTransfer.setData('text/plain', 'player-ribbon')}
+              title="Drag onto a board to publish it to players"
+            >
+              <Users size={16} />
+              PLAYERS
+            </div>
           </div>
           <div className="page-card-row">
             {boards.map((item) => (

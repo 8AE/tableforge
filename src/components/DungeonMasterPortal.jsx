@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Circle,
   Clipboard,
   Copy,
   Eraser,
@@ -20,8 +21,9 @@ import {
   Plus,
   Redo2,
   Ruler,
-  Send,
+  Square,
   Trash2,
+  Triangle,
   Undo2,
   Upload,
   Users,
@@ -701,7 +703,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const selectedDoor = selected?.type === 'door' ? board.doors?.find((door) => door.id === selected.id) : null;
   const sidebarTabs = [
     ['journal', 'Board Items'],
-    ['library', 'Assets & Boards'],
+    ['library', 'Assets'],
     ['soundboard', 'Audio'],
     ['settings', 'Board Setup'],
   ];
@@ -788,6 +790,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onDuplicateBoard={duplicateBoard}
           onDeleteBoard={requestDeleteBoard}
           onPublishBoard={showBoardToPlayers}
+          onProjectHome={leaveProject}
         />
         <div className="map-viewport">
           {layerNotice && <div className="layer-notice" role="status">{layerNotice}</div>}
@@ -812,10 +815,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               <div className="tool-popout" role="group" aria-label={`${tool} options`}>
                 {['draw', 'shape', 'square', 'circle', 'cone'].includes(tool) && (
                   <>
-                    <button type="button" className={tool === 'draw' ? 'active' : ''} onClick={() => setTool('draw')}>Freehand</button>
-                    <button type="button" className={tool === 'shape' ? 'active' : ''} onClick={() => setTool('shape')}>Rect</button>
-                    <button type="button" className={tool === 'circle' ? 'active' : ''} onClick={() => setTool('circle')}>Circle</button>
-                    <button type="button" className={tool === 'cone' ? 'active' : ''} onClick={() => setTool('cone')}>Cone</button>
+                    <button type="button" className={tool === 'draw' ? 'active icon-button' : 'icon-button'} title="Freehand" aria-label="Freehand" onClick={() => setTool('draw')}><Brush size={18} /></button>
+                    <button type="button" className={tool === 'shape' ? 'active icon-button' : 'icon-button'} title="Rectangle" aria-label="Rectangle" onClick={() => setTool('shape')}><Square size={18} /></button>
+                    <button type="button" className={tool === 'circle' ? 'active icon-button' : 'icon-button'} title="Circle" aria-label="Circle" onClick={() => setTool('circle')}><Circle size={18} /></button>
+                    <button type="button" className={tool === 'cone' ? 'active icon-button' : 'icon-button'} title="Cone" aria-label="Cone" onClick={() => setTool('cone')}><Triangle size={18} /></button>
                     <input aria-label="Stroke color" type="color" value={drawColor} onChange={(event) => setDrawColor(event.target.value)} />
                   </>
                 )}
@@ -901,11 +904,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           {activeSidebarTab === 'library' && (
             <div className="sidebar-tab-panel">
 
-        <Panel title="Project" icon={<Layers size={16} />}>
-          <button className="command" title="Return to the project home screen" onClick={leaveProject}><Layers size={16} /> Project home</button>
-          <button className="command accent" title="Open the standalone dungeon builder" onClick={onOpenDungeonBuilder}><Grid2X2 size={16} /> Launch Dungeon Builder</button>
-        </Panel>
-
         <Panel title="Asset Manager" icon={<Upload size={16} />}>
           <label>
             Asset category
@@ -951,39 +949,15 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           </div>
         </Panel>
 
-        <Panel title="Boards" icon={<Layers size={16} />}>
-          <div className="board-list">
-            {state.boards.map((item) => (
-              <div className={`board-list-item ${item.id === state.activeBoardId ? 'active' : ''}`} key={item.id}>
-                <button
-                  className="board-switch"
-                  onClick={() => setState((current) => ({ ...current, activeBoardId: item.id }), { skipHistory: true })}
-                >
-                  <span>{item.name}</span>
-                  {item.id === state.playerBoardId && <Users size={15} />}
-                </button>
-                <button
-                  className="danger-icon"
-                  title={`Delete ${item.name}`}
-                  disabled={state.boards.length <= 1}
-                  onClick={() => requestDeleteBoard(item)}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="split">
-            <button className="command" title="Create a new empty board in this project" onClick={addBoard}><Plus size={16} /> New</button>
-            <button className="command" title="Duplicate the active board" onClick={duplicateBoard}><Copy size={16} /> Duplicate</button>
-          </div>
-          <button className="command accent" title="Publish the active board to the player viewer" onClick={() => showBoardToPlayers()}><Send size={16} /> Show active board to players</button>
-        </Panel>
             </div>
           )}
 
           {activeSidebarTab === 'settings' && (
             <div className="sidebar-tab-panel">
+
+        <Panel title="Dungeon Builder" icon={<Grid2X2 size={16} />}>
+          <button className="command accent" title="Open the standalone dungeon builder" onClick={onOpenDungeonBuilder}><Grid2X2 size={16} /> Launch Dungeon Builder</button>
+        </Panel>
 
         <Panel title="Board" icon={<Image size={16} />}>
           <label>
