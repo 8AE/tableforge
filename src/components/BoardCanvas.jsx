@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   coneTemplate,
   feetBetween,
@@ -512,6 +512,11 @@ export function BoardCanvas({
       ? offsetEntity(door, 'door', drag.dx || 0, drag.dy || 0)
       : drag?.type === 'door' && drag.id === door.id ? drag.preview : door
   ));
+  const boardObjectMotion = useBoardObjectMotion(view === 'player', {
+    tokens: displayTokens,
+    drawings: displayDrawings,
+    doors: displayDoors,
+  }, tile);
   const liveMarquee = drag?.type === 'marquee' ? marqueeBounds(drag) : null;
 
   return (
@@ -582,9 +587,12 @@ export function BoardCanvas({
                 {allBrightPolygons.map((token) => <polygon key={`bright-${token.id}`} points={token.points} fill="black" />)}
               </mask>
             </defs>
-            {[...displayDrawings, ...liveDrawing].map((drawing) => renderDrawing(drawing, tile, selected, isSelected('drawing', drawing.id)))}
+            {displayDrawings.map((drawing) => renderDrawing(drawing, tile, selected, isSelected('drawing', drawing.id), boardObjectMotion.drawings[drawing.id]))}
+            {boardObjectMotion.exiting.drawings.map((drawing) => renderDrawing(drawing, tile, null, false, { className: 'player-object-exit player-svg-motion' }, `exiting-drawing-${drawing.id}`))}
+            {liveDrawing.map((drawing) => renderDrawing(drawing, tile, selected, isSelected('drawing', drawing.id)))}
             {view === 'dm' && displayWalls.map((wall) => renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id)))}
-            {displayDoors.map((door) => renderDoor(door, tile, view, isSelected('door', door.id)))}
+            {displayDoors.map((door) => renderDoor(door, tile, view, isSelected('door', door.id), boardObjectMotion.doors[door.id]))}
+            {boardObjectMotion.exiting.doors.map((door) => renderDoor(door, tile, view, false, { className: 'player-object-exit player-door-motion' }, `exiting-door-${door.id}`))}
             {liveMarquee && (
               <rect
                 className="marquee-selection"
@@ -622,22 +630,29 @@ export function BoardCanvas({
             )}
           </svg>
 
-          {displayTokens.map((token) => (
+          {[...displayTokens, ...boardObjectMotion.exiting.tokens].map((token) => {
+            const motion = token.exiting
+              ? { className: 'player-object-exit player-token-motion' }
+              : boardObjectMotion.tokens[token.id] || {};
+            return (
             <button
-              key={token.id}
-              className={`map-token token-${token.layer} ${token.image ? 'token-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''}`}
+              key={token.exiting ? `exiting-token-${token.id}` : token.id}
+              className={`map-token token-${token.layer} ${token.image ? 'token-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''} ${motion.className || ''}`}
               style={{
                 left: token.x * tile,
                 top: token.y * tile,
                 width: token.size * tile,
                 height: token.size * tile,
                 backgroundColor: token.image ? 'transparent' : token.color,
+                ...motion.style,
               }}
               title={`${token.label} (${token.layer})`}
+              disabled={token.exiting}
             >
               {token.image ? <img src={token.image} alt="" draggable="false" /> : <span>{token.label}</span>}
             </button>
-          ))}
+            );
+          })}
           {contextMenu && (
             <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
               <button onClick={() => { onDuplicateSelection(contextMenu.target); setContextMenu(null); }}>Duplicate</button>
@@ -690,15 +705,16 @@ function nearestDoorEdge(localX, localY, cell) {
   ].sort((a, b) => a.distance - b.distance)[0];
 }
 
-function renderDrawing(drawing, tile, selected, selectedOverride = false) {
+function renderDrawing(drawing, tile, selected, selectedOverride = false, motion = {}, keyOverride = null) {
   const isSelected = selectedOverride || (selected?.type === 'drawing' && selected.id === drawing.id);
-  const className = `${drawing.layer === 'dm' ? 'drawing-gm' : 'drawing-player'} ${isSelected ? 'selected-drawing' : ''}`.trim();
+  const className = `${drawing.layer === 'dm' ? 'drawing-gm' : 'drawing-player'} ${isSelected ? 'selected-drawing' : ''} ${motion.className || ''}`.trim();
   if (drawing.type === 'path') {
     const d = drawing.points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x * tile} ${point.y * tile}`).join(' ');
     return (
       <path
-        key={drawing.id}
+        key={keyOverride || drawing.id}
         className={className}
+        style={motion.style}
         d={d}
         fill="none"
         stroke={drawing.color}
@@ -709,12 +725,12 @@ function renderDrawing(drawing, tile, selected, selectedOverride = false) {
     );
   }
   if (drawing.type === 'measurement') {
-    return renderMeasurement(drawing, tile, isSelected);
+    return renderMeasurement(drawing, tile, isSelected, motion, keyOverride);
   }
-  return renderStoredShape(drawing, tile, isSelected);
+  return renderStoredShape(drawing, tile, isSelected, motion, keyOverride);
 }
 
-function renderMeasurement(drawing, tile, isSelected = false) {
+function renderMeasurement(drawing, tile, isSelected = false, motion = {}, keyOverride = null) {
   const start = drawing.start;
   const end = drawing.end;
   const x1 = (start.x + 0.5) * tile;
@@ -722,7 +738,7 @@ function renderMeasurement(drawing, tile, isSelected = false) {
   const x2 = (end.x + 0.5) * tile;
   const y2 = (end.y + 0.5) * tile;
   return (
-    <g key={drawing.id} className={isSelected ? 'selected-drawing' : ''}>
+    <g key={keyOverride || drawing.id} className={`${isSelected ? 'selected-drawing' : ''} ${motion.className || ''}`.trim()} style={motion.style}>
       <line
         x1={x1}
         y1={y1}
@@ -738,7 +754,7 @@ function renderMeasurement(drawing, tile, isSelected = false) {
   );
 }
 
-function renderStoredShape(drawing, tile, isSelected = false) {
+function renderStoredShape(drawing, tile, isSelected = false, motion = {}, keyOverride = null) {
   const box = shapeBox(drawing);
   const x = box.x * tile;
   const y = box.y * tile;
@@ -755,7 +771,7 @@ function renderStoredShape(drawing, tile, isSelected = false) {
 
   if (drawing.shape === 'circle') {
     return (
-      <g key={drawing.id}>
+      <g key={keyOverride || drawing.id} className={motion.className} style={motion.style}>
         <ellipse {...common} cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} />
         <MeasureLabel x={x + w / 2} y={y + h / 2} text={label} />
       </g>
@@ -768,14 +784,14 @@ function renderStoredShape(drawing, tile, isSelected = false) {
       ...cone.arc.map((point) => `${point.x * tile},${point.y * tile}`),
     ].join(' ');
     return (
-      <g key={drawing.id}>
+      <g key={keyOverride || drawing.id} className={motion.className} style={motion.style}>
         <polygon {...common} points={points} />
         <MeasureLabel x={cone.label.x * tile} y={cone.label.y * tile} text={label} />
       </g>
     );
   }
   return (
-    <g key={drawing.id}>
+    <g key={keyOverride || drawing.id} className={motion.className} style={motion.style}>
       <rect {...common} x={x} y={y} width={w} height={h} rx="4" />
       <MeasureLabel x={x + w / 2} y={y + h / 2} text={label} />
     </g>
@@ -819,14 +835,14 @@ function renderLightingWall(wall, tile, selected = null, isLive = false, selecte
   );
 }
 
-function renderDoor(door, tile, view, isSelected = false) {
+function renderDoor(door, tile, view, isSelected = false, motion = {}, keyOverride = null) {
   const x = door.position.x * tile;
   const y = door.position.y * tile;
   const isOpen = door.state === 'open';
   const isLocked = door.state === 'locked' || door.isLocked;
   const rotation = door.edge?.orientation === 'v' ? 90 : 0;
   return (
-    <g key={`door-${door.id}`} className={`door-icon door-${isLocked ? 'locked' : door.state} ${isSelected ? 'selected-door' : ''}`} transform={`translate(${x} ${y}) rotate(${isOpen ? rotation + 28 : rotation})`}>
+    <g key={keyOverride || `door-${door.id}`} className={`door-icon door-${isLocked ? 'locked' : door.state} ${isSelected ? 'selected-door' : ''} ${motion.className || ''}`} style={motion.style} transform={`translate(${x} ${y}) rotate(${isOpen ? rotation + 28 : rotation})`}>
       <title>{isLocked && view === 'player' ? 'Locked' : `Door: ${door.state}`}</title>
       <rect x="-13" y="-5" width="26" height="10" rx="3" />
       <circle cx="8" cy="0" r="2.2" />
@@ -874,6 +890,148 @@ function visibleTokensForLayer(tokens, activeLayer) {
   if (activeLayer === 'gm') return tokens.filter((token) => token.layer === 'dm');
   if (activeLayer === 'token') return tokens.filter((token) => token.layer === 'player');
   return [];
+}
+
+function useBoardObjectMotion(enabled, collections, tile) {
+  const previousRef = useRef(null);
+  const clearTimerRef = useRef(null);
+  const [motion, setMotion] = useState(emptyMotionState);
+
+  useEffect(() => () => {
+    if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!enabled) {
+      previousRef.current = null;
+      if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
+      setMotion((currentMotion) => hasMotionState(currentMotion) ? emptyMotionState() : currentMotion);
+      return undefined;
+    }
+
+    const current = snapshotBoardObjects(collections, tile);
+    const previous = previousRef.current;
+    previousRef.current = current;
+
+    if (!previous) return undefined;
+
+    const nextMotion = buildBoardObjectMotion(previous, current);
+    if (!nextMotion.hasChanges) return undefined;
+
+    setMotion(nextMotion.state);
+    if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
+    clearTimerRef.current = window.setTimeout(() => {
+      clearTimerRef.current = null;
+      setMotion(emptyMotionState());
+    }, 360);
+    return undefined;
+  }, [enabled, collections.tokens, collections.drawings, collections.doors, tile]);
+
+  return motion;
+}
+
+function emptyMotionState() {
+  return {
+    tokens: {},
+    drawings: {},
+    doors: {},
+    exiting: {
+      tokens: [],
+      drawings: [],
+      doors: [],
+    },
+  };
+}
+
+function hasMotionState(state) {
+  return Boolean(
+    Object.keys(state.tokens).length
+      || Object.keys(state.drawings).length
+      || Object.keys(state.doors).length
+      || state.exiting.tokens.length
+      || state.exiting.drawings.length
+      || state.exiting.doors.length,
+  );
+}
+
+function snapshotBoardObjects(collections, tile) {
+  return {
+    tokens: snapshotById(collections.tokens, (token) => ({
+      center: {
+        x: (token.x + token.size / 2) * tile,
+        y: (token.y + token.size / 2) * tile,
+      },
+      item: cloneBoardObject(token),
+    })),
+    drawings: snapshotById(collections.drawings, (drawing) => ({
+      center: boundsCenter(selectableBounds(drawing, 'drawing'), tile),
+      item: cloneBoardObject(drawing),
+    })),
+    doors: snapshotById(collections.doors, (door) => ({
+      center: {
+        x: door.position.x * tile,
+        y: door.position.y * tile,
+      },
+      item: cloneBoardObject(door),
+    })),
+  };
+}
+
+function snapshotById(items, makeSnapshot) {
+  return Object.fromEntries(items.map((item) => [item.id, makeSnapshot(item)]));
+}
+
+function buildBoardObjectMotion(previous, current) {
+  const state = emptyMotionState();
+  let hasChanges = false;
+
+  buildMotionForType('tokens', 'token', previous, current, state);
+  buildMotionForType('drawings', 'svg', previous, current, state);
+  buildMotionForType('doors', 'door', previous, current, state);
+
+  hasChanges = hasMotionState(state);
+
+  return { hasChanges, state };
+}
+
+function buildMotionForType(type, classType, previous, current, state) {
+  Object.entries(current[type]).forEach(([id, item]) => {
+    const oldItem = previous[type][id];
+    if (!oldItem) {
+      state[type][id] = { className: `player-object-enter player-${classType}-motion` };
+      return;
+    }
+
+    const dx = oldItem.center.x - item.center.x;
+    const dy = oldItem.center.y - item.center.y;
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+      state[type][id] = {
+        className: `player-object-move player-${classType}-motion`,
+        style: {
+          '--motion-x': `${dx}px`,
+          '--motion-y': `${dy}px`,
+        },
+      };
+    }
+  });
+
+  Object.entries(previous[type]).forEach(([id, item]) => {
+    if (current[type][id]) return;
+    state.exiting[type].push({ ...item.item, exiting: true });
+  });
+}
+
+function boundsCenter(bounds, tile) {
+  if (!bounds) return { x: 0, y: 0 };
+  return {
+    x: (bounds.x + bounds.w / 2) * tile,
+    y: (bounds.y + bounds.h / 2) * tile,
+  };
+}
+
+function cloneBoardObject(item) {
+  if (typeof structuredClone === 'function') return structuredClone(item);
+  return JSON.parse(JSON.stringify(item));
 }
 
 function renderRevealHole(reveal, tile, fill = 'black') {
