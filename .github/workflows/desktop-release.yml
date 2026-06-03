@@ -1,0 +1,147 @@
+name: Desktop release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Read package version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.package-version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Read version
+        id: package-version
+        shell: bash
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+
+  mac-dmg:
+    name: Build macOS DMG
+    needs: version
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Build DMG
+        run: npx electron-builder build --mac dmg --universal --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tableforge-${{ needs.version.outputs.version }}-mac-dmg
+          path: release/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-installer:
+    name: Build Windows installer
+    needs: version
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Build NSIS installer
+        run: npx electron-builder build --win nsis --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tableforge-${{ needs.version.outputs.version }}-windows-installer
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Create GitHub release
+    needs:
+      - version
+      - mac-dmg
+      - windows-installer
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tableforge-${{ needs.version.outputs.version }}-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            tag_commit="$(git rev-list -n 1 "$TAG_NAME")"
+            if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+              echo "Tag $TAG_NAME already exists at $tag_commit, not $GITHUB_SHA."
+              echo "Bump package.json version before creating another release."
+              exit 1
+            fi
+          else
+            git tag "$TAG_NAME" "$GITHUB_SHA"
+            git push origin "$TAG_NAME"
+          fi
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" release-assets/* --clobber
+          else
+            gh release create "$TAG_NAME" release-assets/* \
+              --title "Tableforge $TAG_NAME" \
+              --notes "Desktop release for Tableforge $TAG_NAME."
+          fi
