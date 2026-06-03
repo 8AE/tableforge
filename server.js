@@ -132,9 +132,72 @@ function getAssetCategory(file, fallback = '') {
 
 function isAllowedAsset(file, bucket) {
   const extension = path.extname(file.originalname || '').toLowerCase();
-  if (bucket === 'images') return imageExtensions.has(extension) && file.mimetype?.startsWith('image/');
-  if (bucket === 'audio') return audioExtensions.has(extension) && file.mimetype?.startsWith('audio/');
+  if (bucket === 'images') return imageExtensions.has(extension);
+  if (bucket === 'audio') return audioExtensions.has(extension);
   return false;
+}
+
+function extensionForMimeType(mimeType) {
+  if (mimeType === 'image/png') return '.png';
+  if (mimeType === 'image/jpeg') return '.jpg';
+  if (mimeType === 'image/webp') return '.webp';
+  return '';
+}
+
+function mimeTypeForExtension(extension) {
+  if (extension === '.png') return 'image/png';
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+  if (extension === '.webp') return 'image/webp';
+  if (extension === '.mp3') return 'audio/mpeg';
+  if (extension === '.wav') return 'audio/wav';
+  return 'application/octet-stream';
+}
+
+function supportedAssetExtension(value) {
+  const extension = path.extname(value || '').toLowerCase();
+  return imageExtensions.has(extension) || audioExtensions.has(extension) ? extension : '';
+}
+
+function remoteAssetOriginalName(displayName, remotePathname, extension) {
+  const fallbackName = path.basename(decodeURIComponent(remotePathname || '')) || 'remote-map';
+  const rawName = String(displayName || fallbackName).trim() || fallbackName;
+  return sanitizeFilename(`${rawName}${extension && !supportedAssetExtension(rawName) ? extension : ''}`);
+}
+
+async function saveProjectAsset(project, file, fields = {}) {
+  const bucket = getAssetBucket(file, fields.assetType);
+  if (!bucket || !isAllowedAsset(file, bucket)) {
+    const error = new Error('Unsupported asset format.');
+    error.status = 400;
+    throw error;
+  }
+
+  const safeName = sanitizeFilename(file.originalname);
+  const extension = path.extname(safeName).toLowerCase();
+  const mimeType = file.mimetype?.startsWith(bucket === 'images' ? 'image/' : 'audio/')
+    ? file.mimetype
+    : mimeTypeForExtension(extension);
+  const storedName = `${Date.now()}-${randomUUID().slice(0, 8)}-${safeName}`;
+  const targetDir = projectAssetDir(project.id, bucket);
+  const targetFile = path.join(targetDir, storedName);
+  await fs.mkdir(targetDir, { recursive: true });
+  await fs.writeFile(targetFile, file.buffer);
+
+  const asset = {
+    id: `asset-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    name: fields.name?.trim() || safeName,
+    filename: storedName,
+    originalName: file.originalname,
+    bucket,
+    type: bucket === 'images' ? 'image' : 'audio',
+    category: getAssetCategory(file, fields.category || fields.assetType),
+    mimeType,
+    size: file.size,
+    path: `/api/projects/${encodeURIComponent(project.id)}/assets/${bucket}/${encodeURIComponent(storedName)}`,
+    createdAt: new Date().toISOString(),
+  };
+  const savedProject = await writeProject({ ...project, assets: [...(project.assets || []), asset] });
+  return { asset, assets: savedProject.assets };
 }
 
 async function pathExists(target) {
@@ -705,34 +768,57 @@ app.post('/api/projects/:projectId/assets', upload.single('file'), async (reques
     return;
   }
 
-  const bucket = getAssetBucket(request.file, request.body.assetType);
-  if (!bucket || !isAllowedAsset(request.file, bucket)) {
-    response.status(400).json({ error: 'Unsupported asset format.' });
-    return;
+  try {
+    const data = await saveProjectAsset(project, request.file, request.body);
+    response.status(201).json(data);
+  } catch (error) {
+    response.status(error.status || 400).json({ error: error.message || 'Unable to save asset.' });
   }
+});
 
-  const safeName = sanitizeFilename(request.file.originalname);
-  const storedName = `${Date.now()}-${randomUUID().slice(0, 8)}-${safeName}`;
-  const targetDir = projectAssetDir(project.id, bucket);
-  const targetFile = path.join(targetDir, storedName);
-  await fs.mkdir(targetDir, { recursive: true });
-  await fs.writeFile(targetFile, request.file.buffer);
+app.post('/api/projects/:projectId/assets/remote', async (request, response) => {
+  try {
+    const project = await readProject(request.params.projectId);
+    if (!project) {
+      response.status(404).json({ error: 'Project not found.' });
+      return;
+    }
 
-  const asset = {
-    id: `asset-${Date.now()}-${randomUUID().slice(0, 8)}`,
-    name: request.body.name?.trim() || safeName,
-    filename: storedName,
-    originalName: request.file.originalname,
-    bucket,
-    type: bucket === 'images' ? 'image' : 'audio',
-    category: getAssetCategory(request.file, request.body.category || request.body.assetType),
-    mimeType: request.file.mimetype,
-    size: request.file.size,
-    path: `/api/projects/${encodeURIComponent(project.id)}/assets/${bucket}/${encodeURIComponent(storedName)}`,
-    createdAt: new Date().toISOString(),
-  };
-  const savedProject = await writeProject({ ...project, assets: [...(project.assets || []), asset] });
-  response.status(201).json({ asset, assets: savedProject.assets });
+    const target = new URL(String(request.body.url || ''));
+    if (!['http:', 'https:'].includes(target.protocol)) {
+      response.status(400).json({ error: 'Remote asset URL must use http or https.' });
+      return;
+    }
+
+    const upstream = await fetch(target);
+    if (!upstream.ok) {
+      response.status(upstream.status).json({ error: `Unable to load ${target.href}` });
+      return;
+    }
+
+    const upstreamMimeType = upstream.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || '';
+    const extension = path.extname(target.pathname).toLowerCase() || extensionForMimeType(upstreamMimeType);
+    const originalName = remoteAssetOriginalName(request.body.name, target.pathname, extension);
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    if (buffer.length > 50 * 1024 * 1024) {
+      response.status(413).json({ error: 'Remote asset is larger than 50 MB.' });
+      return;
+    }
+
+    const data = await saveProjectAsset(
+      project,
+      {
+        originalname: originalName,
+        mimetype: upstreamMimeType,
+        size: buffer.length,
+        buffer,
+      },
+      { name: request.body.name, category: request.body.category || 'map', assetType: 'image' },
+    );
+    response.status(201).json(data);
+  } catch (error) {
+    response.status(error.status || 400).json({ error: error.message || 'Unable to import remote asset.' });
+  }
 });
 
 app.get('/api/projects/:projectId/assets/:bucket/:filename', async (request, response) => {

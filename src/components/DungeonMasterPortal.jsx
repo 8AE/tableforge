@@ -63,6 +63,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [mapResults, setMapResults] = useState([]);
   const [mapImportError, setMapImportError] = useState('');
   const [isSearchingMaps, setIsSearchingMaps] = useState(false);
+  const [isImportingMap, setIsImportingMap] = useState(false);
   const [assets, setAssets] = useState([]);
   const [assetCategory, setAssetCategory] = useState('token');
   const [assetError, setAssetError] = useState('');
@@ -186,6 +187,19 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       throw new Error(body.error || `Unable to upload ${file.name}.`);
     }
     const data = await response.json();
+    setAssets(data.assets || []);
+    return data.asset;
+  };
+
+  const importRemoteProjectAsset = async ({ url, name, category = 'map' }) => {
+    if (!openProjectId) throw new Error('Open a campaign before importing a 5e.tools map.');
+    const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets/remote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, name, category }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Unable to import ${name || 'remote map image'}.`);
     setAssets(data.assets || []);
     return data.asset;
   };
@@ -336,39 +350,52 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     }
   };
 
-  const importMap = (map) => {
-    const dimensions = getMapBoardDimensions(map);
-    const importedWalls = getMapRegionWalls(map, dimensions);
-    const nextBoard = {
-      ...makeBoard(map.displayTitle || 'Imported Map'),
-      name: map.displayTitle || 'Imported Map',
-      columns: dimensions.columns,
-      rows: dimensions.rows,
-      background: {
-        src: map.imageUrl,
-        x: 0,
-        y: 0,
-        scale: 1,
-        opacity: 1,
-        fitToBoard: true,
-      },
-      lighting: {
-        ...defaultLighting,
-        walls: importedWalls,
-      },
-      doors: [],
-      tokens: [],
-      drawings: [],
-    };
-    setState((current) => ({
-      ...current,
-      boards: [...current.boards, nextBoard],
-      activeBoardId: nextBoard.id,
-    }));
-    setIsFiveEToolsMapImportOpen(false);
+  const importMap = async (map) => {
     setMapImportError('');
-    setMapResults([]);
-    setMapQuery(map.displayTitle);
+    setIsImportingMap(true);
+    try {
+      const asset = await importRemoteProjectAsset({
+        url: map.imageUrl,
+        name: map.displayTitle || 'Imported Map',
+        category: 'map',
+      });
+      const dimensions = getMapBoardDimensions(map);
+      const importedWalls = getMapRegionWalls(map, dimensions);
+      const nextBoard = {
+        ...makeBoard(map.displayTitle || 'Imported Map'),
+        name: map.displayTitle || 'Imported Map',
+        columns: dimensions.columns,
+        rows: dimensions.rows,
+        background: {
+          src: asset.path,
+          x: 0,
+          y: 0,
+          scale: 1,
+          opacity: 1,
+          fitToBoard: true,
+        },
+        lighting: {
+          ...defaultLighting,
+          walls: importedWalls,
+        },
+        doors: [],
+        tokens: [],
+        drawings: [],
+      };
+      setState((current) => ({
+        ...current,
+        boards: [...current.boards, nextBoard],
+        activeBoardId: nextBoard.id,
+      }));
+      setIsFiveEToolsMapImportOpen(false);
+      setMapImportError('');
+      setMapResults([]);
+      setMapQuery(map.displayTitle);
+    } catch (error) {
+      setMapImportError(error.message || 'Unable to import 5e.tools map.');
+    } finally {
+      setIsImportingMap(false);
+    }
   };
 
   const useAssetAsMap = (asset) => {
@@ -1540,8 +1567,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                           <strong>{map.displayTitle}</strong>
                           <span>{map.sourceName} · {map.chapterName} · {dimensions.columns} x {dimensions.rows}</span>
                         </div>
-                        <button className="command" title="Create a new board from this map" onClick={() => importMap(map)}>
-                          <Image size={15} /> Import
+                        <button className="command" title="Create a new board from this map" onClick={() => importMap(map)} disabled={isImportingMap}>
+                          <Image size={15} /> {isImportingMap ? 'Importing...' : 'Import'}
                         </button>
                       </div>
                     );
