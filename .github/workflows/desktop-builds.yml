@@ -30,7 +30,7 @@ jobs:
         run: npm run build
 
       - name: Build DMG
-        run: npx electron-builder build --mac dmg --universal
+        run: npx electron-builder build --mac dmg --universal --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
@@ -64,7 +64,7 @@ jobs:
         run: npm run build
 
       - name: Build NSIS installer
-        run: npx electron-builder build --win nsis --x64
+        run: npx electron-builder build --win nsis --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
