@@ -6,7 +6,7 @@ const layerOptions = [
   ['map', 'Map'],
   ['token', 'Token'],
   ['gm', 'GM'],
-  ['walls', 'Walls'],
+  ['walls', 'Wall/Lighting'],
 ];
 
 export function Topbar({

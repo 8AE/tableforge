@@ -123,7 +123,7 @@ export function dungeonToBoard(dungeon) {
     lighting: {
       enabled: true,
       darkness: 0.86,
-      snapWallsToGrid: true,
+      snapWallsToGrid: false,
       reveals: [],
       hiddenReveals: [],
       walls: normalized.lightingGeometry

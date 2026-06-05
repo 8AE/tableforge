@@ -157,6 +157,51 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const updateLiveMeasurement = (measurement) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, liveMeasurement: measurement })), { skipHistory: true });
   };
+  const toolLayer = {
+    token: 'token',
+    draw: 'token',
+    shape: 'token',
+    square: 'token',
+    circle: 'token',
+    cone: 'token',
+    ruler: 'token',
+    light: 'walls',
+    wall: 'walls',
+    door: 'walls',
+  };
+  const layerForSelection = (target) => {
+    if (!target || target.type === 'multi') return null;
+    if (target.type === 'token') {
+      const token = board.tokens.find((item) => item.id === target.id);
+      return token?.layer === 'dm' ? 'gm' : 'token';
+    }
+    if (target.type === 'drawing') {
+      const drawing = board.drawings.find((item) => item.id === target.id);
+      return drawing?.layer === 'dm' ? 'gm' : 'token';
+    }
+    if (['wall', 'door'].includes(target.type)) return 'walls';
+    return null;
+  };
+  const switchActiveLayer = (layer, nextTool = tool) => {
+    setActiveLayer(layer);
+    setDrawLayer(layer === 'gm' ? 'dm' : 'player');
+    if (layer === 'map') setTool('background');
+    if (layer === 'walls' && !['select', 'wall', 'door', 'light'].includes(nextTool)) setTool('wall');
+    if (['token', 'gm'].includes(layer) && ['background', 'wall', 'door', 'light'].includes(nextTool)) setTool('select');
+    const label = { map: 'Map & Background', token: 'Tokens & Objects', gm: 'GM Info Layer', walls: 'Wall/Lighting' }[layer] || layer;
+    setLayerNotice(label);
+    window.setTimeout(() => setLayerNotice(''), 1100);
+  };
+  const selectTarget = (target, fallbackLayer = null) => {
+    const nextLayer = layerForSelection(target) || fallbackLayer;
+    if (nextLayer && nextLayer !== activeLayer) switchActiveLayer(nextLayer, tool);
+    setSelected(target);
+  };
+  const activateTool = (nextTool) => {
+    const nextLayer = toolLayer[nextTool];
+    if (nextLayer && nextLayer !== activeLayer) switchActiveLayer(nextLayer, nextTool);
+    setTool(nextTool);
+  };
   const assetTypeForFile = (file) => {
     const extension = file.name.toLowerCase().split('.').pop();
     if (file.type.startsWith('audio/') || ['mp3', 'wav'].includes(extension)) return 'audio';
@@ -263,7 +308,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       image: tokenDraft.image || '',
     };
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
-    setSelected({ type: 'token', id: token.id });
+    selectTarget({ type: 'token', id: token.id }, activeLayer === 'gm' ? 'gm' : 'token');
   };
 
   const saveSelectedTokenToLibrary = () => {
@@ -284,7 +329,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       visible: true,
     };
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
-    setSelected({ type: 'token', id: token.id });
+    selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
   };
 
   const updateLibraryToken = (id, patch) => {
@@ -418,7 +463,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const addDrawing = (drawing) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
-    setSelected({ type: 'drawing', id: drawing.id });
+    selectTarget({ type: 'drawing', id: drawing.id }, drawing.layer === 'dm' ? 'gm' : 'token');
   };
 
   const addBoard = () => {
@@ -495,17 +540,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     window.setTimeout(() => publishProjectToPlayers(openProjectId), 320);
   };
 
-  const switchActiveLayer = (layer) => {
-    setActiveLayer(layer);
-    setDrawLayer(layer === 'gm' ? 'dm' : 'player');
-    if (layer === 'map') setTool('background');
-    if (layer === 'walls' && !['select', 'wall', 'door', 'light'].includes(tool)) setTool('wall');
-    if (['token', 'gm'].includes(layer) && ['background', 'wall', 'door', 'light'].includes(tool)) setTool('select');
-    const label = { map: 'Map & Background', token: 'Tokens & Objects', gm: 'GM Info Layer', walls: 'Walls & Lighting' }[layer] || layer;
-    setLayerNotice(label);
-    window.setTimeout(() => setLayerNotice(''), 1100);
-  };
-
   const addLightReveal = (reveal) => {
     const revealArea = revealBox(reveal);
     setState((current) => updateActiveBoard(current, (active) => ({
@@ -544,7 +578,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         doors: [...(active.doors || []), normalizedDoor],
       };
     }));
-    setSelected(null);
+    selectTarget(null);
   };
 
   const moveLightWall = (id, wall) => {
@@ -646,8 +680,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       const remove = new Set(items.map(keyFor));
       nextItems = currentItems.filter((item) => !remove.has(keyFor(item)));
     }
-    if (nextItems.length === 0) setSelected(null);
-    else if (nextItems.length === 1) setSelected(nextItems[0]);
+    if (nextItems.length === 0) selectTarget(null);
+    else if (nextItems.length === 1) selectTarget(nextItems[0]);
     else setSelected({ type: 'multi', items: nextItems });
   };
 
@@ -661,17 +695,17 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     if (clipboard.type === 'token') {
       const token = { ...clipboard.item, id: uid('token'), x: clipboard.item.x + 1, y: clipboard.item.y + 1 };
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
-      setSelected({ type: 'token', id: token.id });
+      selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
     }
     if (clipboard.type === 'drawing') {
       const drawing = offsetDrawing({ ...clipboard.item, id: uid('drawing') }, 1, 1);
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
-      setSelected({ type: 'drawing', id: drawing.id });
+      selectTarget({ type: 'drawing', id: drawing.id }, drawing.layer === 'dm' ? 'gm' : 'token');
     }
     if (clipboard.type === 'door') {
       const door = { ...offsetEntity(clipboard.item, 'door', 1, 1), id: uid('door') };
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, doors: [...(active.doors || []), door] })));
-      setSelected({ type: 'door', id: door.id });
+      selectTarget({ type: 'door', id: door.id }, 'walls');
     }
   };
 
@@ -691,7 +725,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         ? { ...defaultLighting, ...active.lighting, walls: (active.lighting?.walls || []).filter((wall) => !wallIds.has(wall.id)) }
         : active.lighting,
     })));
-    setSelected(null);
+    selectTarget(null);
   };
 
   const duplicateSelection = (target = selected) => {
@@ -701,14 +735,14 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       if (!source) return;
       const token = { ...structuredClone(source), id: uid('token'), x: source.x + 1, y: source.y + 1 };
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
-      setSelected({ type: 'token', id: token.id });
+      selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
     }
     if (target.type === 'drawing') {
       const source = board.drawings.find((drawing) => drawing.id === target.id);
       if (!source) return;
       const drawing = { ...structuredClone(source), ...offsetDrawing(source, 1, 1), id: uid('drawing') };
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
-      setSelected({ type: 'drawing', id: drawing.id });
+      selectTarget({ type: 'drawing', id: drawing.id }, drawing.layer === 'dm' ? 'gm' : 'token');
     }
     if (target.type === 'wall') {
       const source = board.lighting?.walls?.find((wall) => wall.id === target.id);
@@ -723,14 +757,14 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         ...active,
         lighting: { ...defaultLighting, ...active.lighting, walls: [...(active.lighting?.walls || []), wall] },
       })));
-      setSelected({ type: 'wall', id: wall.id });
+      selectTarget({ type: 'wall', id: wall.id }, 'walls');
     }
     if (target.type === 'door') {
       const source = board.doors?.find((door) => door.id === target.id);
       if (!source) return;
       const door = { ...offsetEntity(structuredClone(source), 'door', 1, 1), id: uid('door') };
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, doors: [...(active.doors || []), door] })));
-      setSelected({ type: 'door', id: door.id });
+      selectTarget({ type: 'door', id: door.id }, 'walls');
     }
   };
 
@@ -766,7 +800,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       const keyTools = { v: 'select', t: 'token', d: 'draw', m: 'ruler', l: 'light' };
       if (!event.metaKey && !event.ctrlKey && keyTools[event.key.toLowerCase()]) {
         event.preventDefault();
-        setTool(keyTools[event.key.toLowerCase()]);
+        activateTool(keyTools[event.key.toLowerCase()]);
         return;
       }
       const arrowDeltas = {
@@ -847,7 +881,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                   title={label}
                   aria-label={label}
                   className={tool === id ? 'active' : ''}
-                  onClick={() => setTool(id)}
+                  onClick={() => activateTool(id)}
                 >
                   {icon}
                   <span>{hotkey}</span>
@@ -855,22 +889,36 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               ))}
             </div>
             {['draw', 'shape', 'square', 'circle', 'cone', 'light', 'wall', 'door'].includes(tool) && (
-              <div className="tool-popout" role="group" aria-label={`${tool} options`}>
-                {['draw', 'shape', 'square', 'circle', 'cone'].includes(tool) && (
-                  <>
-                    <button type="button" className={tool === 'draw' ? 'active icon-button' : 'icon-button'} title="Freehand" aria-label="Freehand" onClick={() => setTool('draw')}><Brush size={18} /></button>
-                    <button type="button" className={tool === 'shape' ? 'active icon-button' : 'icon-button'} title="Rectangle" aria-label="Rectangle" onClick={() => setTool('shape')}><Square size={18} /></button>
-                    <button type="button" className={tool === 'circle' ? 'active icon-button' : 'icon-button'} title="Circle" aria-label="Circle" onClick={() => setTool('circle')}><Circle size={18} /></button>
-                    <button type="button" className={tool === 'cone' ? 'active icon-button' : 'icon-button'} title="Cone" aria-label="Cone" onClick={() => setTool('cone')}><Triangle size={18} /></button>
-                    <input aria-label="Stroke color" type="color" value={drawColor} onChange={(event) => setDrawColor(event.target.value)} />
-                  </>
-                )}
+              <div className="quick-menu-options">
+                <div className="tool-popout" role="group" aria-label={`${tool} options`}>
+                  {['draw', 'shape', 'square', 'circle', 'cone'].includes(tool) && (
+                    <>
+                      <button type="button" className={tool === 'draw' ? 'active icon-button' : 'icon-button'} title="Freehand" aria-label="Freehand" onClick={() => activateTool('draw')}><Brush size={18} /></button>
+                      <button type="button" className={tool === 'shape' ? 'active icon-button' : 'icon-button'} title="Rectangle" aria-label="Rectangle" onClick={() => activateTool('shape')}><Square size={18} /></button>
+                      <button type="button" className={tool === 'circle' ? 'active icon-button' : 'icon-button'} title="Circle" aria-label="Circle" onClick={() => activateTool('circle')}><Circle size={18} /></button>
+                      <button type="button" className={tool === 'cone' ? 'active icon-button' : 'icon-button'} title="Cone" aria-label="Cone" onClick={() => activateTool('cone')}><Triangle size={18} /></button>
+                      <input aria-label="Stroke color" type="color" value={drawColor} onChange={(event) => setDrawColor(event.target.value)} />
+                    </>
+                  )}
+                  {['light', 'wall', 'door'].includes(tool) && (
+                    <>
+                      <button type="button" className={tool === 'wall' ? 'active' : ''} onClick={() => activateTool('wall')}>Wall</button>
+                      <button type="button" className={tool === 'door' ? 'active' : ''} onClick={() => activateTool('door')}>Door</button>
+                      <button type="button" className={tool === 'light' ? 'active' : ''} onClick={() => activateTool('light')}>Reveal / Hide</button>
+                    </>
+                  )}
+                </div>
                 {['light', 'wall', 'door'].includes(tool) && (
-                  <>
-                    <button type="button" className={tool === 'wall' ? 'active' : ''} onClick={() => setTool('wall')}>Wall</button>
-                    <button type="button" className={tool === 'door' ? 'active' : ''} onClick={() => setTool('door')}>Door</button>
-                    <button type="button" className={tool === 'light' ? 'active' : ''} onClick={() => setTool('light')}>Reveal / Hide</button>
-                  </>
+                  <div className="lighting-tool-options" role="group" aria-label="Lighting settings">
+                    <label className="check-row compact-check" title="Darken the player board and reveal only lit areas">
+                      <input type="checkbox" checked={Boolean(board.lighting?.enabled)} onChange={(event) => toggleLighting(event.target.checked)} />
+                      Enable lighting
+                    </label>
+                    <label className="check-row compact-check" title="Snap lighting wall endpoints to grid cells">
+                      <input type="checkbox" checked={Boolean(board.lighting?.snapWallsToGrid)} onChange={(event) => updateLighting({ snapWallsToGrid: event.target.checked })} />
+                      Snap to grid
+                    </label>
+                  </div>
                 )}
               </div>
             )}
@@ -889,7 +937,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             view="dm"
             tool={tool}
             selected={selected}
-            setSelected={setSelected}
+            setSelected={selectTarget}
             activeLayer={activeLayer}
             drawLayer={drawLayer}
             drawColor={drawColor}
@@ -1088,7 +1136,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <input type="range" min="0.35" max="1" step="0.01" value={board.lighting?.darkness ?? defaultLighting.darkness} onChange={(event) => updateLighting({ darkness: Number(event.target.value) })} />
           </label>
           <label className="check-row" title="When disabled, wall endpoints can be placed anywhere on the map">
-            <input type="checkbox" checked={board.lighting?.snapWallsToGrid !== false} onChange={(event) => updateLighting({ snapWallsToGrid: event.target.checked })} />
+            <input type="checkbox" checked={Boolean(board.lighting?.snapWallsToGrid)} onChange={(event) => updateLighting({ snapWallsToGrid: event.target.checked })} />
             Snap lighting walls to grid
           </label>
           <button className="command" title="Remove all manually revealed lighting areas" onClick={clearLightReveals}><Eraser size={16} /> Clear reveal areas</button>
@@ -1319,7 +1367,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               {board.tokens.map((token) => (
                 <div className="asset-row token-row" key={token.id}>
                   <span className="swatch" style={{ background: token.color }} />
-                  <input value={token.label} onChange={(event) => updateToken(token.id, { label: event.target.value })} onFocus={() => setSelected({ type: 'token', id: token.id })} />
+                  <input value={token.label} onChange={(event) => updateToken(token.id, { label: event.target.value })} onFocus={() => selectTarget({ type: 'token', id: token.id })} />
                   <button title="Toggle token visibility" onClick={() => updateToken(token.id, { visible: !token.visible })}>
                     {token.visible ? <Eye size={15} /> : <EyeOff size={15} />}
                   </button>
@@ -1343,7 +1391,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               {board.drawings.map((drawing, index) => (
                 <div className="asset-row drawing-row" key={drawing.id}>
                   <span className="swatch square-swatch" style={{ background: drawing.color }} />
-                  <button className="asset-name" title="Select drawing" onClick={() => setSelected({ type: 'drawing', id: drawing.id })}>
+                  <button className="asset-name" title="Select drawing" onClick={() => selectTarget({ type: 'drawing', id: drawing.id })}>
                     {drawing.type === 'measurement' ? 'Measurement' : drawing.type === 'path' ? 'Freehand' : drawing.shape || 'Shape'} {index + 1}
                   </button>
                   <button title="Toggle drawing visibility" onClick={() => updateDrawing(drawing.id, { visible: drawing.visible === false })}>

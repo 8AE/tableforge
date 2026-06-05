@@ -4,7 +4,7 @@ export const tileFeet = 5;
 export const defaultLighting = {
   enabled: false,
   darkness: 1,
-  snapWallsToGrid: true,
+  snapWallsToGrid: false,
   reveals: [],
   hiddenReveals: [],
   walls: [],
