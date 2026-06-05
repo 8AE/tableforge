@@ -20,9 +20,23 @@ const legacyDataFile = path.join(dataDir, 'projects.json');
 const openProjectFile = path.join(dataDir, 'open-project.json');
 const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const audioExtensions = new Set(['.mp3', '.wav']);
+const videoExtensions = new Set(['.mp4', '.webm', '.mov']);
+const maxProjectAssetUploadBytes = 1024 * 1024 * 1024;
 const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  storage: multer.diskStorage({
+    destination: async (_request, _file, callback) => {
+      try {
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tableforge-asset-upload-'));
+        callback(null, tempDir);
+      } catch (error) {
+        callback(error);
+      }
+    },
+    filename: (_request, file, callback) => {
+      callback(null, `${Date.now()}-${randomUUID()}${path.extname(file.originalname || '.asset')}`);
+    },
+  }),
+  limits: { fileSize: maxProjectAssetUploadBytes },
 });
 const importUpload = multer({
   storage: multer.diskStorage({
@@ -119,14 +133,19 @@ function sanitizeDungeonArchiveName(value) {
 function getAssetBucket(file, requestedType = '') {
   const extension = path.extname(file.originalname || '').toLowerCase();
   const assetType = String(requestedType || '').toLowerCase();
-  if (assetType === 'audio' || file.mimetype?.startsWith('audio/') || audioExtensions.has(extension)) return 'audio';
-  if (assetType === 'image' || file.mimetype?.startsWith('image/') || imageExtensions.has(extension)) return 'images';
+  if (file.mimetype?.startsWith('audio/') || audioExtensions.has(extension)) return 'audio';
+  if (file.mimetype?.startsWith('video/') || videoExtensions.has(extension)) return 'videos';
+  if (file.mimetype?.startsWith('image/') || imageExtensions.has(extension)) return 'images';
+  if (assetType === 'audio') return 'audio';
+  if (assetType === 'video') return 'videos';
+  if (assetType === 'image') return 'images';
   return null;
 }
 
 function getAssetCategory(file, fallback = '') {
   const normalized = String(fallback || '').trim().toLowerCase();
-  if (['map', 'token', 'music', 'audio', 'image'].includes(normalized)) return normalized;
+  if (['map', 'token', 'music', 'audio', 'image', 'video'].includes(normalized)) return normalized;
+  if (file.mimetype?.startsWith('video/')) return 'video';
   return file.mimetype?.startsWith('audio/') ? 'audio' : 'image';
 }
 
@@ -134,6 +153,7 @@ function isAllowedAsset(file, bucket) {
   const extension = path.extname(file.originalname || '').toLowerCase();
   if (bucket === 'images') return imageExtensions.has(extension);
   if (bucket === 'audio') return audioExtensions.has(extension);
+  if (bucket === 'videos') return videoExtensions.has(extension);
   return false;
 }
 
@@ -150,12 +170,15 @@ function mimeTypeForExtension(extension) {
   if (extension === '.webp') return 'image/webp';
   if (extension === '.mp3') return 'audio/mpeg';
   if (extension === '.wav') return 'audio/wav';
+  if (extension === '.mp4') return 'video/mp4';
+  if (extension === '.webm') return 'video/webm';
+  if (extension === '.mov') return 'video/quicktime';
   return 'application/octet-stream';
 }
 
 function supportedAssetExtension(value) {
   const extension = path.extname(value || '').toLowerCase();
-  return imageExtensions.has(extension) || audioExtensions.has(extension) ? extension : '';
+  return imageExtensions.has(extension) || audioExtensions.has(extension) || videoExtensions.has(extension) ? extension : '';
 }
 
 function remoteAssetOriginalName(displayName, remotePathname, extension) {
@@ -174,14 +197,19 @@ async function saveProjectAsset(project, file, fields = {}) {
 
   const safeName = sanitizeFilename(file.originalname);
   const extension = path.extname(safeName).toLowerCase();
-  const mimeType = file.mimetype?.startsWith(bucket === 'images' ? 'image/' : 'audio/')
+  const mimePrefix = bucket === 'images' ? 'image/' : bucket === 'videos' ? 'video/' : 'audio/';
+  const mimeType = file.mimetype?.startsWith(mimePrefix)
     ? file.mimetype
     : mimeTypeForExtension(extension);
   const storedName = `${Date.now()}-${randomUUID().slice(0, 8)}-${safeName}`;
   const targetDir = projectAssetDir(project.id, bucket);
   const targetFile = path.join(targetDir, storedName);
   await fs.mkdir(targetDir, { recursive: true });
-  await fs.writeFile(targetFile, file.buffer);
+  if (file.path) {
+    await fs.copyFile(file.path, targetFile);
+  } else {
+    await fs.writeFile(targetFile, file.buffer);
+  }
 
   const asset = {
     id: `asset-${Date.now()}-${randomUUID().slice(0, 8)}`,
@@ -189,7 +217,7 @@ async function saveProjectAsset(project, file, fields = {}) {
     filename: storedName,
     originalName: file.originalname,
     bucket,
-    type: bucket === 'images' ? 'image' : 'audio',
+    type: bucket === 'images' ? 'image' : bucket === 'videos' ? 'video' : 'audio',
     category: getAssetCategory(file, fields.category || fields.assetType),
     mimeType,
     size: file.size,
@@ -198,6 +226,20 @@ async function saveProjectAsset(project, file, fields = {}) {
   };
   const savedProject = await writeProject({ ...project, assets: [...(project.assets || []), asset] });
   return { asset, assets: savedProject.assets };
+}
+
+function uploadProjectAssetFile(request, response, next) {
+  upload.single('file')(request, response, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      response.status(413).json({ error: 'Asset is larger than 1 GB.' });
+      return;
+    }
+    response.status(400).json({ error: error.message || 'Unable to upload asset.' });
+  });
 }
 
 async function pathExists(target) {
@@ -233,6 +275,7 @@ async function writeJsonAtomic(file, data) {
 async function ensureProjectFolders(projectId) {
   await fs.mkdir(projectAssetDir(projectId, 'images'), { recursive: true });
   await fs.mkdir(projectAssetDir(projectId, 'audio'), { recursive: true });
+  await fs.mkdir(projectAssetDir(projectId, 'videos'), { recursive: true });
 }
 
 async function readOpenProjectId() {
@@ -278,7 +321,7 @@ async function writeProject(project) {
 function boardAssetReferences(board) {
   const references = new Set();
   const add = (value) => {
-    if (typeof value === 'string' && value.includes('/assets/images/')) references.add(value);
+    if (typeof value === 'string' && (value.includes('/assets/images/') || value.includes('/assets/videos/'))) references.add(value);
   };
   add(board?.background?.src);
   for (const token of board?.tokens || []) add(token.image);
@@ -294,13 +337,13 @@ async function pruneBoardAssets(project, removedBoard) {
   }
   const nextAssets = [];
   for (const asset of project.assets || []) {
-    const isRemovedImage = asset.type === 'image' && removedRefs.has(asset.path) && !remainingRefs.has(asset.path);
-    if (!isRemovedImage) {
+    const isRemovedBoardMedia = ['image', 'video'].includes(asset.type) && removedRefs.has(asset.path) && !remainingRefs.has(asset.path);
+    if (!isRemovedBoardMedia) {
       nextAssets.push(asset);
       continue;
     }
-    if (asset.filename && asset.bucket === 'images') {
-      await fs.rm(path.join(projectAssetDir(project.id, 'images'), asset.filename), { force: true }).catch(() => {});
+    if (asset.filename && ['images', 'videos'].includes(asset.bucket)) {
+      await fs.rm(path.join(projectAssetDir(project.id, asset.bucket), asset.filename), { force: true }).catch(() => {});
     }
   }
   return nextAssets;
@@ -434,12 +477,13 @@ function validateArchiveShape(entry, normalized) {
   const isDirectory = entry.type === 'Directory';
   const withoutTrailingSlash = normalized.replace(/\/$/, '');
   if (isDirectory) {
-    if (['assets', 'assets/images', 'assets/audio'].includes(withoutTrailingSlash)) return;
+    if (['assets', 'assets/images', 'assets/audio', 'assets/videos'].includes(withoutTrailingSlash)) return;
     throw new Error(`Unexpected directory in archive: ${entry.path}`);
   }
   if (normalized === 'project.json') return;
   const imagePrefix = 'assets/images/';
   const audioPrefix = 'assets/audio/';
+  const videoPrefix = 'assets/videos/';
   if (normalized.startsWith(imagePrefix)) {
     const filename = normalized.slice(imagePrefix.length);
     if (filename && filename === path.posix.basename(filename) && imageExtensions.has(path.extname(filename).toLowerCase())) return;
@@ -447,6 +491,10 @@ function validateArchiveShape(entry, normalized) {
   if (normalized.startsWith(audioPrefix)) {
     const filename = normalized.slice(audioPrefix.length);
     if (filename && filename === path.posix.basename(filename) && audioExtensions.has(path.extname(filename).toLowerCase())) return;
+  }
+  if (normalized.startsWith(videoPrefix)) {
+    const filename = normalized.slice(videoPrefix.length);
+    if (filename && filename === path.posix.basename(filename) && videoExtensions.has(path.extname(filename).toLowerCase())) return;
   }
   throw new Error(`Unexpected file in archive: ${entry.path}`);
 }
@@ -757,22 +805,25 @@ app.get('/api/projects/:projectId/assets', async (request, response) => {
   response.json({ assets: project.assets || [] });
 });
 
-app.post('/api/projects/:projectId/assets', upload.single('file'), async (request, response) => {
-  const project = await readProject(request.params.projectId);
-  if (!project) {
-    response.status(404).json({ error: 'Project not found.' });
-    return;
-  }
-  if (!request.file) {
-    response.status(400).json({ error: 'No file uploaded.' });
-    return;
-  }
-
+app.post('/api/projects/:projectId/assets', uploadProjectAssetFile, async (request, response) => {
+  const uploadedFile = request.file?.path;
+  const uploadedDir = uploadedFile ? path.dirname(uploadedFile) : null;
   try {
+    const project = await readProject(request.params.projectId);
+    if (!project) {
+      response.status(404).json({ error: 'Project not found.' });
+      return;
+    }
+    if (!request.file) {
+      response.status(400).json({ error: 'No file uploaded.' });
+      return;
+    }
     const data = await saveProjectAsset(project, request.file, request.body);
     response.status(201).json(data);
   } catch (error) {
     response.status(error.status || 400).json({ error: error.message || 'Unable to save asset.' });
+  } finally {
+    if (uploadedDir) await fs.rm(uploadedDir, { recursive: true, force: true }).catch(() => {});
   }
 });
 
@@ -823,7 +874,7 @@ app.post('/api/projects/:projectId/assets/remote', async (request, response) => 
 
 app.get('/api/projects/:projectId/assets/:bucket/:filename', async (request, response) => {
   const { projectId, bucket, filename } = request.params;
-  if (!isProjectId(projectId) || !['images', 'audio'].includes(bucket) || filename !== path.basename(filename)) {
+  if (!isProjectId(projectId) || !['images', 'audio', 'videos'].includes(bucket) || filename !== path.basename(filename)) {
     response.status(400).json({ error: 'Invalid asset path.' });
     return;
   }

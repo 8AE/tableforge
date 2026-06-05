@@ -51,6 +51,7 @@ export function BoardCanvas({
   const [contextMenu, setContextMenu] = useState(null);
   const [lockedDoorAlert, setLockedDoorAlert] = useState(null);
   const shellRef = useRef(null);
+  const backgroundVideoRef = useRef(null);
   const [fitScale, setFitScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const tile = board.tileSize;
@@ -94,6 +95,16 @@ export function BoardCanvas({
   const activeCanvasTokens = useMemo(() => (
     visibleTokensForLayer(dmTokens, activeLayer)
   ), [activeLayer, dmTokens]);
+  const restartBackgroundVideo = (video) => {
+    video.currentTime = 0.001;
+    video.play().catch(() => {});
+  };
+  const loopBackgroundVideo = (video) => {
+    if (!Number.isFinite(video.duration) || video.duration <= 0 || video.currentTime < 0.5) return;
+    const loopAt = Math.min(10, Math.max(0.5, video.duration - 0.05));
+    if (!video.ended && video.currentTime < loopAt) return;
+    restartBackgroundVideo(video);
+  };
   const brightPolygons = useMemo(() => (
     playerTokens
       .filter((token) => token.visionEnabled !== false && Number(token.visionBrightFeet ?? token.visionFeet) > 0)
@@ -145,6 +156,52 @@ export function BoardCanvas({
       window.removeEventListener('resize', resize);
     };
   }, [fitToViewport, width, height]);
+
+  useEffect(() => {
+    if (background.type !== 'video' || !background.src) return undefined;
+    const video = backgroundVideoRef.current;
+    if (!video) return undefined;
+
+    video.loop = true;
+    let frameId = 0;
+    let lastTime = video.currentTime;
+    let lastProgressAt = performance.now();
+    const restart = () => loopBackgroundVideo(video);
+    const resume = () => {
+      if (video.ended) {
+        restartBackgroundVideo(video);
+        return;
+      }
+      if (video.paused) video.play().catch(() => {});
+    };
+    const monitor = () => {
+      const now = performance.now();
+      if (video.currentTime !== lastTime) {
+        lastTime = video.currentTime;
+        lastProgressAt = now;
+      }
+      loopBackgroundVideo(video);
+      if (video.readyState >= 2 && now - lastProgressAt > 750) {
+        resume();
+        if (video.ended || (Number.isFinite(video.duration) && video.currentTime >= Math.min(10, Math.max(0.5, video.duration - 0.05)))) {
+          restartBackgroundVideo(video);
+          lastProgressAt = now;
+        }
+      }
+      frameId = window.requestAnimationFrame(monitor);
+    };
+
+    video.addEventListener('ended', restart);
+    video.addEventListener('pause', resume);
+    video.play().catch(() => {});
+    frameId = window.requestAnimationFrame(monitor);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      video.removeEventListener('ended', restart);
+      video.removeEventListener('pause', resume);
+    };
+  }, [background.src, background.type]);
 
   const pointFromEvent = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -537,20 +594,44 @@ export function BoardCanvas({
           onContextMenu={onContextMenu}
         >
           {background.src && (
-            <img
-              className="board-background"
-              src={background.src}
-              alt=""
-              draggable="false"
-              style={{
-                left: background.fitToBoard ? 0 : background.x,
-                top: background.fitToBoard ? 0 : background.y,
-                width: background.fitToBoard ? width : width * background.scale,
-                height: background.fitToBoard ? height : undefined,
-                objectFit: background.fitToBoard ? 'fill' : undefined,
-                opacity: background.opacity,
-              }}
-            />
+            background.type === 'video' ? (
+              <video
+                ref={backgroundVideoRef}
+                key={background.src}
+                className="board-background"
+                src={background.src}
+                autoPlay
+                loop
+                muted={background.muted !== false}
+                playsInline
+                preload="auto"
+                draggable="false"
+                onTimeUpdate={(event) => loopBackgroundVideo(event.currentTarget)}
+                style={{
+                  left: background.fitToBoard ? 0 : background.x,
+                  top: background.fitToBoard ? 0 : background.y,
+                  width: background.fitToBoard ? width : width * background.scale,
+                  height: background.fitToBoard ? height : undefined,
+                  objectFit: background.fitToBoard ? 'fill' : undefined,
+                  opacity: background.opacity,
+                }}
+              />
+            ) : (
+              <img
+                className="board-background"
+                src={background.src}
+                alt=""
+                draggable="false"
+                style={{
+                  left: background.fitToBoard ? 0 : background.x,
+                  top: background.fitToBoard ? 0 : background.y,
+                  width: background.fitToBoard ? width : width * background.scale,
+                  height: background.fitToBoard ? height : undefined,
+                  objectFit: background.fitToBoard ? 'fill' : undefined,
+                  opacity: background.opacity,
+                }}
+              />
+            )
           )}
           {tool === 'background' && view === 'dm' && background.src && !background.fitToBoard && (
             <div

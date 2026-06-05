@@ -27,6 +27,8 @@ import {
   Undo2,
   Upload,
   Users,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import { BoardCanvas } from './BoardCanvas';
@@ -77,6 +79,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const board = getBoard(state, state.activeBoardId);
   const tokenLibrary = state.tokenLibrary || [];
   const imageAssets = assets.filter((asset) => asset.type === 'image');
+  const backgroundAssets = assets.filter((asset) => asset.type === 'image' || asset.type === 'video');
   const audioAssets = assets.filter((asset) => asset.type === 'audio');
   const sidebarStyle = { '--dm-sidebar-width': `${sidebarWidth}px` };
 
@@ -154,6 +157,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const updateLiveMeasurement = (measurement) => {
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, liveMeasurement: measurement })), { skipHistory: true });
   };
+  const assetTypeForFile = (file) => {
+    const extension = file.name.toLowerCase().split('.').pop();
+    if (file.type.startsWith('audio/') || ['mp3', 'wav'].includes(extension)) return 'audio';
+    if (file.type.startsWith('video/') || ['mp4', 'webm', 'mov'].includes(extension)) return 'video';
+    return 'image';
+  };
   const fetchProjectAssets = async () => {
     if (!openProjectId) return;
     try {
@@ -177,7 +186,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     const form = new FormData();
     form.append('file', file);
     form.append('category', category);
-    form.append('assetType', file.type.startsWith('audio/') ? 'audio' : 'image');
+    form.append('assetType', assetTypeForFile(file));
     const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets`, {
       method: 'POST',
       body: form,
@@ -220,7 +229,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     }
   };
 
-  const uploadImageForUse = async (event, category, onAssetReady) => {
+  const uploadAssetForUse = async (event, category, onAssetReady) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
@@ -230,7 +239,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       const asset = await uploadProjectAsset(file, category);
       if (asset) onAssetReady(asset);
     } catch (error) {
-      setAssetError(error.message || 'Unable to upload image asset.');
+      setAssetError(error.message || 'Unable to upload asset.');
     } finally {
       setIsUploadingAsset(false);
     }
@@ -399,7 +408,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   };
 
   const useAssetAsMap = (asset) => {
-    updateBackground({ src: asset.path, opacity: 1, fitToBoard: true, x: 0, y: 0, scale: 1 });
+    updateBackground({ src: asset.path, type: asset.type === 'video' ? 'video' : 'image', muted: true, opacity: 1, fitToBoard: true, x: 0, y: 0, scale: 1 });
     setMapImportError('');
   };
 
@@ -946,6 +955,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               <option value="map">Map</option>
               <option value="music">Background music</option>
               <option value="image">Image</option>
+              <option value="video">Video</option>
               <option value="audio">Audio</option>
             </select>
           </label>
@@ -959,22 +969,24 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           >
             <Upload size={18} />
             <span>{isUploadingAsset ? 'Uploading...' : 'Drop files or browse'}</span>
-            <small>.png, .jpeg, .webp, .mp3, .wav</small>
-            <input type="file" multiple accept=".png,.jpg,.jpeg,.webp,.mp3,.wav,image/png,image/jpeg,image/webp,audio/mpeg,audio/wav" onChange={(event) => uploadProjectAssets(event.target.files)} />
+            <small>.png, .jpeg, .webp, .mp4, .webm, .mov, .mp3, .wav</small>
+            <input type="file" multiple accept=".png,.jpg,.jpeg,.webp,.mp4,.webm,.mov,.mp3,.wav,image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav" onChange={(event) => uploadProjectAssets(event.target.files)} />
           </label>
           {assetError && <p className="form-error">{assetError}</p>}
           <div className="project-asset-grid">
             {assets.map((asset) => (
               <div className="project-asset-card" key={asset.id}>
                 <div className="project-asset-preview">
-                  {asset.type === 'image' ? <img src={asset.path} alt="" /> : <Music size={22} />}
+                  {asset.type === 'image' && <img src={asset.path} alt="" />}
+                  {asset.type === 'video' && <video src={asset.path} muted playsInline preload="metadata" />}
+                  {asset.type === 'audio' && <Music size={22} />}
                 </div>
                 <strong title={asset.name}>{asset.name}</strong>
                 <span>{asset.category} · {asset.type}</span>
-                {asset.type === 'image' && (
+                {(asset.type === 'image' || asset.type === 'video') && (
                   <div className="project-asset-actions">
-                    <button title="Use this image for new tokens" onClick={() => useAssetForTokenDraft(asset)}>Token</button>
-                    <button title="Use this image as the active board background" onClick={() => useAssetAsMap(asset)}>Map</button>
+                    {asset.type === 'image' && <button title="Use this image for new tokens" onClick={() => useAssetForTokenDraft(asset)}>Token</button>}
+                    <button title={`Use this ${asset.type} as the active board background`} onClick={() => useAssetAsMap(asset)}>Map</button>
                   </div>
                 )}
               </div>
@@ -1017,21 +1029,28 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         <Panel title="Background Layer" icon={<Image size={16} />}>
           <label className="file-button">
             <Image size={16} />
-            {isUploadingAsset ? 'Uploading image...' : 'Background image'}
-            <input type="file" accept="image/*" onChange={(event) => uploadImageForUse(event, 'map', useAssetAsMap)} />
+            {isUploadingAsset ? 'Uploading background...' : 'Background media'}
+            <input type="file" accept="image/*,video/mp4,video/webm,video/quicktime" onChange={(event) => uploadAssetForUse(event, 'map', useAssetAsMap)} />
           </label>
-          {imageAssets.length > 0 && (
+          {backgroundAssets.length > 0 && (
             <details className="asset-picker">
               <summary>Choose from Project Assets</summary>
               <div className="asset-picker-grid">
-                {imageAssets.map((asset) => (
+                {backgroundAssets.map((asset) => (
                   <button key={asset.id} title={`Use ${asset.name} as the active board background`} onClick={() => useAssetAsMap(asset)}>
-                    <img src={asset.path} alt="" />
+                    {asset.type === 'video' ? <video src={asset.path} muted playsInline preload="metadata" /> : <img src={asset.path} alt="" />}
                     <span>{asset.name}</span>
                   </button>
                 ))}
               </div>
             </details>
+          )}
+          {board.background.type === 'video' && (
+            <label className="check-row" title="Mute or unmute the looping video background">
+              <input type="checkbox" checked={board.background.muted !== false} onChange={(event) => updateBackground({ muted: event.target.checked })} />
+              {board.background.muted === false ? <Volume2 size={15} /> : <VolumeX size={15} />}
+              Mute background video
+            </label>
           )}
           <label className="check-row" title="Keep the background image stretched to the board's full width and height">
             <input type="checkbox" checked={Boolean(board.background.fitToBoard)} onChange={(event) => toggleBackgroundFit(event.target.checked)} />
@@ -1192,7 +1211,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <label className="file-button">
               <Image size={16} />
               {isUploadingAsset ? 'Uploading image...' : 'Token image'}
-              <input type="file" accept="image/*" onChange={(event) => uploadImageForUse(event, 'token', (asset) => updateToken(selectedToken.id, { image: asset.path }))} />
+              <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateToken(selectedToken.id, { image: asset.path }))} />
             </label>
             {imageAssets.length > 0 && (
               <details className="asset-picker">
@@ -1448,7 +1467,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                         <label className="file-button">
                           <Image size={16} />
                           {isUploadingAsset ? 'Uploading image...' : 'Token image'}
-                          <input type="file" accept="image/*" onChange={(event) => uploadImageForUse(event, 'token', (asset) => updateLibraryToken(libraryToken.id, { image: asset.path }))} />
+                          <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateLibraryToken(libraryToken.id, { image: asset.path }))} />
                         </label>
                         {imageAssets.length > 0 && (
                           <details className="asset-picker">

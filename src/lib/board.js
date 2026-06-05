@@ -29,6 +29,8 @@ export function makeBoard(name = 'Blackstone Crossing') {
     tileSize: 42,
     background: {
       src: '',
+      type: 'image',
+      muted: true,
       x: 0,
       y: 0,
       scale: 1,
@@ -103,6 +105,7 @@ export function migrateState(raw) {
         tokens: (board.tokens || []).map((token) => normalizeBoardToken(token)),
         drawings: (board.drawings || []).map((drawing) => normalizeDrawing(drawing)),
         doors: normalizeDoors(board.doors || board.dungeonMetadata?.doors || []),
+        background: normalizeBackground(board.background),
       })),
       playerBoardId: raw.playerBoardId || raw.activeBoardId || raw.boards[0].id,
     };
@@ -114,6 +117,8 @@ export function migrateState(raw) {
       ...raw.board,
       background: {
         src: raw.board.background || '',
+        type: 'image',
+        muted: true,
         x: 0,
         y: 0,
         scale: raw.board.backgroundScale || 1,
@@ -244,9 +249,9 @@ export function updateActiveBoard(state, updater) {
 
 export function normalizeBackground(background) {
   if (typeof background === 'string') {
-    return { src: background, x: 0, y: 0, scale: 1, opacity: 0.72, fitToBoard: false };
+    return { src: background, type: 'image', muted: true, x: 0, y: 0, scale: 1, opacity: 0.72, fitToBoard: false };
   }
-  return { src: '', x: 0, y: 0, scale: 1, opacity: 0.72, fitToBoard: false, ...background };
+  return { src: '', type: 'image', muted: true, x: 0, y: 0, scale: 1, opacity: 0.72, fitToBoard: false, ...background };
 }
 
 export function snapToTile(point, board) {
