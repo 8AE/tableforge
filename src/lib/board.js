@@ -137,8 +137,11 @@ export function migrateState(raw) {
 }
 
 export function normalizeLibraryToken(token = {}) {
+  const tokenKind = token.tokenKind === 'vehicle' ? 'vehicle' : 'creature';
+  const vehicle = normalizeVehicleToken(token.vehicle, token);
   return {
     id: token.id || uid('library-token'),
+    tokenKind,
     label: token.label || 'Token',
     color: token.color || '#df5d52',
     image: token.image || '',
@@ -152,10 +155,12 @@ export function normalizeLibraryToken(token = {}) {
     lightDimFeet: Number(token.lightDimFeet) || 0,
     visionMode: token.visionMode || 'darkvision',
     visionEnabled: token.visionEnabled ?? true,
+    vehicle,
   };
 }
 
 export function normalizeBoardToken(token = {}) {
+  const tokenKind = token.tokenKind === 'vehicle' ? 'vehicle' : 'creature';
   return {
     ...entityBase('token', token),
     visionFeet: 0,
@@ -166,9 +171,48 @@ export function normalizeBoardToken(token = {}) {
     visionMode: 'darkvision',
     visionEnabled: true,
     ...token,
+    tokenKind,
+    vehicle: normalizeVehicleToken(token.vehicle, token),
     ...entityCapabilities.token,
     entityType: 'token',
   };
+}
+
+export function normalizeVehicleToken(vehicle = {}, token = {}) {
+  return {
+    width: clampVehicleDimension(vehicle.width ?? token.vehicleWidth ?? token.width ?? token.size ?? 4),
+    height: clampVehicleDimension(vehicle.height ?? token.vehicleHeight ?? token.height ?? token.size ?? 3),
+    backgroundImage: vehicle.backgroundImage || token.vehicleBackgroundImage || token.image || '',
+    rotation: normalizeVehicleRotation(vehicle.rotation ?? token.vehicleRotation),
+    imageOffsetX: Number(vehicle.imageOffsetX) || 0,
+    imageOffsetY: Number(vehicle.imageOffsetY) || 0,
+    imageScale: clampVehicleImageScale(vehicle.imageScale),
+  };
+}
+
+export function tokenFootprint(token = {}) {
+  if (token.tokenKind === 'vehicle') {
+    const vehicle = normalizeVehicleToken(token.vehicle, token);
+    if (vehicle.rotation === 90 || vehicle.rotation === 270) {
+      return { width: vehicle.height, height: vehicle.width };
+    }
+    return { width: vehicle.width, height: vehicle.height };
+  }
+  const size = Number(token.size) || 1;
+  return { width: size, height: size };
+}
+
+function clampVehicleDimension(value) {
+  return Math.max(1, Math.min(30, Math.round(Number(value) || 1)));
+}
+
+function normalizeVehicleRotation(value) {
+  const rotation = ((Math.round((Number(value) || 0) / 90) * 90) % 360 + 360) % 360;
+  return rotation;
+}
+
+function clampVehicleImageScale(value) {
+  return Math.max(0.25, Math.min(4, Number(value) || 1));
 }
 
 export function normalizeDrawing(drawing = {}) {
@@ -331,7 +375,10 @@ export function boxesOverlap(a, b) {
 
 export function selectableBounds(item, type) {
   if (!item) return null;
-  if (type === 'token') return { x: item.x, y: item.y, w: item.size, h: item.size };
+  if (type === 'token') {
+    const footprint = tokenFootprint(item);
+    return { x: item.x, y: item.y, w: footprint.width, h: footprint.height };
+  }
   if (type === 'drawing') return drawingBounds(item);
   if (type === 'wall') return wallBounds(item);
   if (type === 'door') return doorBounds(item);

@@ -12,6 +12,7 @@ import {
   shapeBox,
   shapeMeasurement,
   snapToTile,
+  tokenFootprint,
   uid,
   visionPolygonPoints,
   wallEndpoints,
@@ -29,6 +30,8 @@ export function BoardCanvas({
   onAddToken,
   onMoveToken,
   onMoveSelection,
+  vehicleImageAdjustTokenId,
+  onAdjustVehicleImage,
   onAddDoor,
   onMoveDoor,
   onAddDrawing,
@@ -213,9 +216,16 @@ export function BoardCanvas({
     };
   };
 
-  const tokenAt = (point) => [...activeCanvasTokens].reverse().find((token) => (
-    point.x >= token.x && point.x <= token.x + token.size && point.y >= token.y && point.y <= token.y + token.size
-  ));
+  const tokenAt = (point) => [...activeCanvasTokens]
+    .filter((token) => {
+      const footprint = tokenFootprint(token);
+      return point.x >= token.x && point.x <= token.x + footprint.width && point.y >= token.y && point.y <= token.y + footprint.height;
+    })
+    .sort((a, b) => {
+      const aFootprint = tokenFootprint(a);
+      const bFootprint = tokenFootprint(b);
+      return (aFootprint.width * aFootprint.height) - (bFootprint.width * bFootprint.height);
+    })[0];
 
   const drawingAt = (point) => [...activeCanvasDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing));
   const wallAt = (point) => activeLayer === 'walls' ? [...lighting.walls].reverse().find((wall) => isPointNearWall(point, wall)) : null;
@@ -263,6 +273,20 @@ export function BoardCanvas({
     }
 
     if (tool === 'select' && token) {
+      if (token.tokenKind === 'vehicle' && vehicleImageAdjustTokenId === token.id) {
+        setSelected({ type: 'token', id: token.id });
+        setDrag({
+          type: 'vehicle-image',
+          id: token.id,
+          start: { x: point.px, y: point.py },
+          rotation: token.vehicle?.rotation || 0,
+          original: {
+            imageOffsetX: Number(token.vehicle?.imageOffsetX) || 0,
+            imageOffsetY: Number(token.vehicle?.imageOffsetY) || 0,
+          },
+        });
+        return;
+      }
       const isGroupDrag = isSelected('token', token.id) && selected?.type === 'multi';
       if (!isGroupDrag) setSelected({ type: 'token', id: token.id });
       setDrag({
@@ -360,10 +384,23 @@ export function BoardCanvas({
       return;
     }
 
+    if (drag.type === 'vehicle-image') {
+      const dx = point.px - drag.start.x;
+      const dy = point.py - drag.start.y;
+      const local = rotateDelta(dx, dy, -(drag.rotation || 0));
+      onAdjustVehicleImage?.(drag.id, {
+        imageOffsetX: Math.round(drag.original.imageOffsetX + local.x),
+        imageOffsetY: Math.round(drag.original.imageOffsetY + local.y),
+      });
+      return;
+    }
+
     if (drag.type === 'token') {
+      const draggedToken = activeCanvasTokens.find((token) => token.id === drag.id);
+      const footprint = tokenFootprint(draggedToken);
       const preview = {
-        x: Math.max(0, Math.min(board.columns - 1, Math.floor(point.x - drag.offset.x))),
-        y: Math.max(0, Math.min(board.rows - 1, Math.floor(point.y - drag.offset.y))),
+        x: Math.max(0, Math.min(board.columns - footprint.width, Math.floor(point.x - drag.offset.x))),
+        y: Math.max(0, Math.min(board.rows - footprint.height, Math.floor(point.y - drag.offset.y))),
       };
       setDrag({
         ...drag,
@@ -715,22 +752,57 @@ export function BoardCanvas({
             const motion = token.exiting
               ? { className: 'player-object-exit player-token-motion' }
               : boardObjectMotion.tokens[token.id] || {};
+            const footprint = tokenFootprint(token);
+            const vehicleImage = token.vehicle?.backgroundImage || token.image;
+            const isVehicle = token.tokenKind === 'vehicle';
+            const vehicleRotation = token.vehicle?.rotation || 0;
+            const vehicleRotatesSideways = vehicleRotation === 90 || vehicleRotation === 270;
+            const vehicleSurfaceWidth = (vehicleRotatesSideways ? footprint.height : footprint.width) * tile;
+            const vehicleSurfaceHeight = (vehicleRotatesSideways ? footprint.width : footprint.height) * tile;
+            const vehicleImageOffsetX = Number(token.vehicle?.imageOffsetX) || 0;
+            const vehicleImageOffsetY = Number(token.vehicle?.imageOffsetY) || 0;
+            const vehicleImageScale = Math.max(0.25, Math.min(4, Number(token.vehicle?.imageScale) || 1));
             return (
             <button
               key={token.exiting ? `exiting-token-${token.id}` : token.id}
-              className={`map-token token-${token.layer} ${token.image ? 'token-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''} ${motion.className || ''}`}
+              className={`map-token token-${token.layer} ${token.image && !isVehicle ? 'token-image' : ''} ${isVehicle ? 'vehicle-token' : ''} ${isVehicle && view === 'player' ? 'vehicle-token-player' : ''} ${vehicleImage && isVehicle ? 'has-vehicle-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''} ${motion.className || ''}`}
               style={{
                 left: token.x * tile,
                 top: token.y * tile,
-                width: token.size * tile,
-                height: token.size * tile,
-                backgroundColor: token.image ? 'transparent' : token.color,
+                width: footprint.width * tile,
+                height: footprint.height * tile,
+                backgroundColor: token.image || isVehicle ? 'transparent' : token.color,
+                '--tile-size': `${tile}px`,
+                '--vehicle-surface-width': `${vehicleSurfaceWidth}px`,
+                '--vehicle-surface-height': `${vehicleSurfaceHeight}px`,
                 ...motion.style,
               }}
               title={`${token.label} (${token.layer})`}
               disabled={token.exiting}
             >
-              {token.image ? <img src={token.image} alt="" draggable="false" /> : <span>{token.label}</span>}
+              {isVehicle ? (
+                <>
+                  <span
+                    className="vehicle-token-rotator"
+                    style={{
+                      transform: `translate(-50%, -50%) rotate(${vehicleRotation}deg)`,
+                    }}
+                  >
+                    <span className="vehicle-token-surface">
+                      {vehicleImage && (
+                        <img
+                          className="vehicle-token-image"
+                          src={vehicleImage}
+                          alt=""
+                          draggable="false"
+                          style={{ transform: `translate(${vehicleImageOffsetX}px, ${vehicleImageOffsetY}px) scale(${vehicleImageScale})` }}
+                        />
+                      )}
+                    </span>
+                    {view === 'dm' && <span className="vehicle-token-grid" />}
+                  </span>
+                </>
+              ) : token.image ? <img src={token.image} alt="" draggable="false" /> : <span>{token.label}</span>}
             </button>
             );
           })}
@@ -1039,8 +1111,8 @@ function snapshotBoardObjects(collections, tile) {
   return {
     tokens: snapshotById(collections.tokens, (token) => ({
       center: {
-        x: (token.x + token.size / 2) * tile,
-        y: (token.y + token.size / 2) * tile,
+        x: (token.x + tokenFootprint(token).width / 2) * tile,
+        y: (token.y + tokenFootprint(token).height / 2) * tile,
       },
       item: cloneBoardObject(token),
     })),
@@ -1164,6 +1236,16 @@ function clampPoint(point, board) {
   return {
     x: Math.max(0, Math.min(board.columns, point.x)),
     y: Math.max(0, Math.min(board.rows, point.y)),
+  };
+}
+
+function rotateDelta(dx, dy, degrees) {
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: dx * cos - dy * sin,
+    y: dx * sin + dy * cos,
   };
 }
 

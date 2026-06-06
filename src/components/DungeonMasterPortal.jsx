@@ -30,11 +30,12 @@ import {
   Volume2,
   VolumeX,
   X,
+  RotateCw,
 } from 'lucide-react';
 import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
 import { Topbar } from './Topbar';
-import { boxesOverlap, defaultLighting, getBoard, getBoardEntity, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, uid, updateActiveBoard } from '../lib/board';
+import { boxesOverlap, defaultLighting, getBoard, getBoardEntity, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, tokenFootprint, uid, updateActiveBoard } from '../lib/board';
 import { dungeonToBoard, normalizeDungeon } from '../lib/dungeon';
 
 export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
@@ -42,7 +43,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [activeLayer, setActiveLayer] = useState('token');
   const [layerNotice, setLayerNotice] = useState('');
   const [publishToast, setPublishToast] = useState('');
-  const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1 });
+  const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1, tokenKind: 'creature', vehicle: { width: 4, height: 3, backgroundImage: '', rotation: 0 } });
   const [drawColor, setDrawColor] = useState('#36d399');
   const [drawLayer, setDrawLayer] = useState('player');
   const [selected, setSelected] = useState(null);
@@ -61,6 +62,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [bestiaryResults, setBestiaryResults] = useState([]);
   const [bestiaryError, setBestiaryError] = useState('');
   const [isSearchingBestiary, setIsSearchingBestiary] = useState(false);
+  const [vehicleImageAdjustTokenId, setVehicleImageAdjustTokenId] = useState(null);
   const [mapQuery, setMapQuery] = useState('');
   const [mapResults, setMapResults] = useState([]);
   const [mapImportError, setMapImportError] = useState('');
@@ -132,6 +134,33 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       ...active,
       tokens: active.tokens.map((token) => token.id === id ? { ...token, ...patch } : token),
     })));
+  };
+  const updateVehicleImage = (id, patch) => {
+    updateToken(id, {
+      vehicle: {
+        ...(board.tokens.find((token) => token.id === id)?.vehicle || {}),
+        ...patch,
+      },
+    });
+  };
+  const moveToken = (id, point) => {
+    setState((current) => updateActiveBoard(current, (active) => {
+      const source = active.tokens.find((token) => token.id === id);
+      if (!source) return active;
+      const dx = point.x - source.x;
+      const dy = point.y - source.y;
+      const passengerIds = source.tokenKind === 'vehicle'
+        ? vehiclePassengerIds(active.tokens, source, new Set([id]))
+        : new Set();
+      return {
+        ...active,
+        tokens: active.tokens.map((token) => {
+          if (token.id === id) return { ...token, ...point };
+          if (passengerIds.has(token.id)) return offsetEntity(token, 'token', dx, dy);
+          return token;
+        }),
+      };
+    }));
   };
   const updateDrawing = (id, patch) => {
     setState((current) => updateActiveBoard(current, (active) => ({
@@ -291,14 +320,22 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   };
 
   const addToken = (point) => {
+    const isVehicle = tokenDraft.tokenKind === 'vehicle';
+    const draftVehicle = {
+      width: Number(tokenDraft.vehicle?.width) || 4,
+      height: Number(tokenDraft.vehicle?.height) || 3,
+      backgroundImage: tokenDraft.vehicle?.backgroundImage || tokenDraft.image || '',
+      rotation: Number(tokenDraft.vehicle?.rotation) || 0,
+    };
     const token = {
       id: uid('token'),
       x: point.x,
       y: point.y,
-      label: tokenDraft.label || 'Token',
+      tokenKind: isVehicle ? 'vehicle' : 'creature',
+      label: tokenDraft.label || (isVehicle ? 'Vehicle' : 'Token'),
       color: tokenDraft.color,
       layer: activeLayer === 'gm' ? 'dm' : 'player',
-      size: Number(tokenDraft.size) || 1,
+      size: isVehicle ? Math.max(draftVehicle.width, draftVehicle.height) : Number(tokenDraft.size) || 1,
       visible: true,
       visionEnabled: true,
       visionBrightFeet: 0,
@@ -306,6 +343,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       lightBrightFeet: 0,
       lightDimFeet: 0,
       image: tokenDraft.image || '',
+      vehicle: draftVehicle,
     };
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     selectTarget({ type: 'token', id: token.id }, activeLayer === 'gm' ? 'gm' : 'token');
@@ -458,7 +496,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   };
 
   const useAssetForTokenDraft = (asset) => {
-    setTokenDraft((draft) => ({ ...draft, image: asset.path }));
+    setTokenDraft((draft) => ({ ...draft, image: asset.path, vehicle: { ...(draft.vehicle || {}), backgroundImage: asset.path } }));
   };
 
   const addDrawing = (drawing) => {
@@ -624,7 +662,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const nudgeSelection = (dx, dy) => {
     if (!selected) return;
     const amount = selected.type === 'wall' ? 0.2 : 1;
-    if (selected.type === 'token' && selectedToken) updateToken(selected.id, { x: Math.max(0, selectedToken.x + dx * amount), y: Math.max(0, selectedToken.y + dy * amount) });
+    if (selected.type === 'token' && selectedToken) moveToken(selected.id, { x: Math.max(0, selectedToken.x + dx * amount), y: Math.max(0, selectedToken.y + dy * amount) });
     if (selected.type === 'drawing' && selectedDrawing) updateDrawing(selected.id, offsetDrawing(selectedDrawing, dx * amount, dy * amount));
     if (selected.type === 'door' && selectedDoor) updateDoor(selected.id, offsetEntity(selectedDoor, 'door', dx * amount, dy * amount));
     if (selected.type === 'wall') {
@@ -648,23 +686,31 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     const drawingIds = new Set(items.filter((item) => item.type === 'drawing').map((item) => item.id));
     const wallIds = new Set(items.filter((item) => item.type === 'wall').map((item) => item.id));
     const doorIds = new Set(items.filter((item) => item.type === 'door').map((item) => item.id));
-    setState((current) => updateActiveBoard(current, (active) => ({
-      ...active,
-      tokens: active.tokens.map((token) => tokenIds.has(token.id) ? offsetEntity(token, 'token', dx, dy) : token),
-      drawings: active.drawings.map((drawing) => drawingIds.has(drawing.id) ? offsetEntity(drawing, 'drawing', dx, dy) : drawing),
-      doors: (active.doors || []).map((door) => doorIds.has(door.id) ? offsetEntity(door, 'door', dx, dy) : door),
-      lighting: {
-        ...defaultLighting,
-        ...active.lighting,
-        walls: (active.lighting?.walls || []).map((wall) => wallIds.has(wall.id)
-          ? {
-              ...wall,
-              start: { x: wall.start.x + dx, y: wall.start.y + dy },
-              end: { x: wall.end.x + dx, y: wall.end.y + dy },
-            }
-          : wall),
-      },
-    })));
+    setState((current) => updateActiveBoard(current, (active) => {
+      const passengerIds = active.tokens.reduce((ids, token) => {
+        if (tokenIds.has(token.id) && token.tokenKind === 'vehicle') {
+          vehiclePassengerIds(active.tokens, token, tokenIds).forEach((id) => ids.add(id));
+        }
+        return ids;
+      }, new Set());
+      return {
+        ...active,
+        tokens: active.tokens.map((token) => tokenIds.has(token.id) || passengerIds.has(token.id) ? offsetEntity(token, 'token', dx, dy) : token),
+        drawings: active.drawings.map((drawing) => drawingIds.has(drawing.id) ? offsetEntity(drawing, 'drawing', dx, dy) : drawing),
+        doors: (active.doors || []).map((door) => doorIds.has(door.id) ? offsetEntity(door, 'door', dx, dy) : door),
+        lighting: {
+          ...defaultLighting,
+          ...active.lighting,
+          walls: (active.lighting?.walls || []).map((wall) => wallIds.has(wall.id)
+            ? {
+                ...wall,
+                start: { x: wall.start.x + dx, y: wall.start.y + dy },
+                end: { x: wall.end.x + dx, y: wall.end.y + dy },
+              }
+            : wall),
+        },
+      };
+    }));
   };
 
   const selectMultiple = (items, mode = 'replace') => {
@@ -791,6 +837,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     ['ruler', <Ruler size={18} />, 'Ruler / Measurement', 'M'],
     ['light', <Lightbulb size={18} />, 'Lighting & Vision', 'L'],
   ];
+
+  useEffect(() => {
+    if (vehicleImageAdjustTokenId && selectedToken?.id !== vehicleImageAdjustTokenId) {
+      setVehicleImageAdjustTokenId(null);
+    }
+  }, [selectedToken?.id, vehicleImageAdjustTokenId]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -942,8 +994,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             drawLayer={drawLayer}
             drawColor={drawColor}
             onAddToken={addToken}
-            onMoveToken={(id, point) => updateToken(id, point)}
+            onMoveToken={moveToken}
             onMoveSelection={moveSelection}
+            vehicleImageAdjustTokenId={vehicleImageAdjustTokenId}
+            onAdjustVehicleImage={updateVehicleImage}
             onAddDoor={addDoor}
             onMoveDoor={moveDoor}
             onMoveDrawing={(id, dx, dy) => updateDrawing(id, offsetDrawing(board.drawings.find((drawing) => drawing.id === id), dx, dy))}
@@ -1206,6 +1260,13 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
         <Panel title="Token" icon={<Plus size={16} />}>
           <label>
+            Type
+            <select value={tokenDraft.tokenKind || 'creature'} onChange={(event) => setTokenDraft({ ...tokenDraft, tokenKind: event.target.value })}>
+              <option value="creature">Standard token</option>
+              <option value="vehicle">Vehicle token</option>
+            </select>
+          </label>
+          <label>
             Label
             <input value={tokenDraft.label} onChange={(event) => setTokenDraft({ ...tokenDraft, label: event.target.value })} />
           </label>
@@ -1216,9 +1277,26 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             </label>
             <label>
               Size
-              <input type="number" min="1" max="6" value={tokenDraft.size} onChange={(event) => setTokenDraft({ ...tokenDraft, size: event.target.value })} />
+              <input type="number" min="1" max="6" value={tokenDraft.size} onChange={(event) => setTokenDraft({ ...tokenDraft, size: event.target.value })} disabled={tokenDraft.tokenKind === 'vehicle'} />
             </label>
           </div>
+          {tokenDraft.tokenKind === 'vehicle' && (
+            <div className="vehicle-editor">
+              <div className="split">
+                <label>
+                  Grid width
+                  <input type="number" min="1" max="30" value={tokenDraft.vehicle?.width || 4} onChange={(event) => setTokenDraft({ ...tokenDraft, vehicle: { ...(tokenDraft.vehicle || {}), width: Number(event.target.value) } })} />
+                </label>
+                <label>
+                  Grid height
+                  <input type="number" min="1" max="30" value={tokenDraft.vehicle?.height || 3} onChange={(event) => setTokenDraft({ ...tokenDraft, vehicle: { ...(tokenDraft.vehicle || {}), height: Number(event.target.value) } })} />
+                </label>
+              </div>
+              <button className="command" title="Rotate new vehicle tokens 90 degrees" onClick={() => setTokenDraft({ ...tokenDraft, vehicle: { ...(tokenDraft.vehicle || {}), rotation: (((tokenDraft.vehicle?.rotation || 0) + 90) % 360) } })}>
+                <RotateCw size={16} /> Rotate {tokenDraft.vehicle?.rotation || 0} degrees
+              </button>
+            </div>
+          )}
           {tokenDraft.image && (
             <div className="selected-asset-row">
               <img src={tokenDraft.image} alt="" />
@@ -1230,7 +1308,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               <summary>Pick token image from assets</summary>
               <div className="asset-picker-grid">
                 {imageAssets.map((asset) => (
-                  <button key={asset.id} title={`Use ${asset.name} for new tokens`} onClick={() => useAssetForTokenDraft(asset)}>
+                  <button key={asset.id} title={`Use ${asset.name} for new tokens`} onClick={() => setTokenDraft((draft) => ({ ...draft, image: asset.path, vehicle: { ...(draft.vehicle || {}), backgroundImage: asset.path } }))}>
                     <img src={asset.path} alt="" />
                     <span>{asset.name}</span>
                   </button>
@@ -1253,20 +1331,53 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               </label>
               <label>
                 Size
-                <input type="number" min="1" max="6" value={selectedToken.size} onChange={(event) => updateToken(selectedToken.id, { size: Number(event.target.value) })} />
+                <input type="number" min="1" max="6" value={selectedToken.size} onChange={(event) => updateToken(selectedToken.id, { size: Number(event.target.value) })} disabled={selectedToken.tokenKind === 'vehicle'} />
               </label>
             </div>
+            {selectedToken.tokenKind === 'vehicle' && (
+              <div className="vehicle-editor">
+                <div className="split">
+                  <label>
+                    Grid width
+                    <input type="number" min="1" max="30" value={selectedToken.vehicle?.width || 1} onChange={(event) => updateToken(selectedToken.id, { vehicle: { ...(selectedToken.vehicle || {}), width: Number(event.target.value) } })} />
+                  </label>
+                  <label>
+                    Grid height
+                    <input type="number" min="1" max="30" value={selectedToken.vehicle?.height || 1} onChange={(event) => updateToken(selectedToken.id, { vehicle: { ...(selectedToken.vehicle || {}), height: Number(event.target.value) } })} />
+                  </label>
+                </div>
+                <button className="command" title="Rotate this vehicle token 90 degrees" onClick={() => updateToken(selectedToken.id, { vehicle: { ...(selectedToken.vehicle || {}), rotation: (((selectedToken.vehicle?.rotation || 0) + 90) % 360) } })}>
+                  <RotateCw size={16} /> Rotate {selectedToken.vehicle?.rotation || 0} degrees
+                </button>
+                <label>
+                  Image scale
+                  <input type="range" min="0.25" max="4" step="0.05" value={selectedToken.vehicle?.imageScale || 1} onChange={(event) => updateVehicleImage(selectedToken.id, { imageScale: Number(event.target.value) })} />
+                </label>
+                <label>
+                  Scale value
+                  <input type="number" min="0.25" max="4" step="0.05" value={selectedToken.vehicle?.imageScale || 1} onChange={(event) => updateVehicleImage(selectedToken.id, { imageScale: Number(event.target.value) })} />
+                </label>
+                <div className="shortcut-row">
+                  <button className={vehicleImageAdjustTokenId === selectedToken.id ? 'command accent' : 'command'} title="Drag this vehicle on the board to reposition its image" onClick={() => setVehicleImageAdjustTokenId((id) => id === selectedToken.id ? null : selectedToken.id)}>
+                    <MousePointer2 size={16} /> {vehicleImageAdjustTokenId === selectedToken.id ? 'Done adjusting' : 'Adjust image'}
+                  </button>
+                  <button className="command" title="Reset this vehicle image position and scale" onClick={() => updateVehicleImage(selectedToken.id, { imageOffsetX: 0, imageOffsetY: 0, imageScale: 1 })}>
+                    Reset image
+                  </button>
+                </div>
+              </div>
+            )}
             <label className="file-button">
               <Image size={16} />
-              {isUploadingAsset ? 'Uploading image...' : 'Token image'}
-              <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateToken(selectedToken.id, { image: asset.path }))} />
+              {isUploadingAsset ? 'Uploading image...' : selectedToken.tokenKind === 'vehicle' ? 'Vehicle background' : 'Token image'}
+              <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateToken(selectedToken.id, selectedToken.tokenKind === 'vehicle' ? { image: asset.path, vehicle: { ...(selectedToken.vehicle || {}), backgroundImage: asset.path } } : { image: asset.path }))} />
             </label>
             {imageAssets.length > 0 && (
               <details className="asset-picker">
                 <summary>Pick image from project assets</summary>
                 <div className="asset-picker-grid">
                   {imageAssets.map((asset) => (
-                    <button key={asset.id} title={`Use ${asset.name} for this token`} onClick={() => updateToken(selectedToken.id, { image: asset.path })}>
+                    <button key={asset.id} title={`Use ${asset.name} for this token`} onClick={() => updateToken(selectedToken.id, selectedToken.tokenKind === 'vehicle' ? { image: asset.path, vehicle: { ...(selectedToken.vehicle || {}), backgroundImage: asset.path } } : { image: asset.path })}>
                       <img src={asset.path} alt="" />
                       <span>{asset.name}</span>
                     </button>
@@ -1488,7 +1599,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                       </span>
                       <div>
                         <strong>{libraryToken.label}</strong>
-                        <span>{libraryToken.layer} · size {libraryToken.size} · vision {libraryToken.visionFeet || 0} ft</span>
+                        <span>
+                          {libraryToken.layer} · {libraryToken.tokenKind === 'vehicle'
+                            ? `vehicle ${libraryToken.vehicle?.width || 1} x ${libraryToken.vehicle?.height || 1}`
+                            : `size ${libraryToken.size} · vision ${libraryToken.visionFeet || 0} ft`}
+                        </span>
                       </div>
                     </div>
                     <div className="library-card-actions">
@@ -1512,17 +1627,34 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                             <input type="number" min="1" max="6" value={libraryToken.size} onChange={(event) => updateLibraryToken(libraryToken.id, { size: Number(event.target.value) })} />
                           </label>
                         </div>
+                        {libraryToken.tokenKind === 'vehicle' && (
+                          <div className="vehicle-editor">
+                            <div className="split">
+                              <label>
+                                Grid width
+                                <input type="number" min="1" max="30" value={libraryToken.vehicle?.width || 1} onChange={(event) => updateLibraryToken(libraryToken.id, { vehicle: { ...(libraryToken.vehicle || {}), width: Number(event.target.value) } })} />
+                              </label>
+                              <label>
+                                Grid height
+                                <input type="number" min="1" max="30" value={libraryToken.vehicle?.height || 1} onChange={(event) => updateLibraryToken(libraryToken.id, { vehicle: { ...(libraryToken.vehicle || {}), height: Number(event.target.value) } })} />
+                              </label>
+                            </div>
+                            <button className="command" title="Rotate this library vehicle token 90 degrees" onClick={() => updateLibraryToken(libraryToken.id, { vehicle: { ...(libraryToken.vehicle || {}), rotation: (((libraryToken.vehicle?.rotation || 0) + 90) % 360) } })}>
+                              <RotateCw size={16} /> Rotate {libraryToken.vehicle?.rotation || 0} degrees
+                            </button>
+                          </div>
+                        )}
                         <label className="file-button">
                           <Image size={16} />
-                          {isUploadingAsset ? 'Uploading image...' : 'Token image'}
-                          <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateLibraryToken(libraryToken.id, { image: asset.path }))} />
+                          {isUploadingAsset ? 'Uploading image...' : libraryToken.tokenKind === 'vehicle' ? 'Vehicle background' : 'Token image'}
+                          <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateLibraryToken(libraryToken.id, libraryToken.tokenKind === 'vehicle' ? { image: asset.path, vehicle: { ...(libraryToken.vehicle || {}), backgroundImage: asset.path } } : { image: asset.path }))} />
                         </label>
                         {imageAssets.length > 0 && (
                           <details className="asset-picker">
                             <summary>Pick image from project assets</summary>
                             <div className="asset-picker-grid">
                               {imageAssets.map((asset) => (
-                                <button key={asset.id} title={`Use ${asset.name} for this library token`} onClick={() => updateLibraryToken(libraryToken.id, { image: asset.path })}>
+                                <button key={asset.id} title={`Use ${asset.name} for this library token`} onClick={() => updateLibraryToken(libraryToken.id, libraryToken.tokenKind === 'vehicle' ? { image: asset.path, vehicle: { ...(libraryToken.vehicle || {}), backgroundImage: asset.path } } : { image: asset.path })}>
                                   <img src={asset.path} alt="" />
                                   <span>{asset.name}</span>
                                 </button>
@@ -1870,6 +2002,16 @@ function monsterTokenImage(baseUrl, monster) {
   const source = encodeURIComponent(monster.source);
   const name = encodeURIComponent(monster.name).replace(/'/g, '%27');
   return `${normalizeFiveEToolsBaseUrl(baseUrl)}img/bestiary/tokens/${source}/${name}.webp`;
+}
+
+function vehiclePassengerIds(tokens, vehicle, excludedIds = new Set()) {
+  const footprint = tokenFootprint(vehicle);
+  const bounds = { x: vehicle.x, y: vehicle.y, w: footprint.width, h: footprint.height };
+  return tokens.reduce((ids, token) => {
+    if (excludedIds.has(token.id) || token.tokenKind === 'vehicle') return ids;
+    if (token.x >= bounds.x && token.x < bounds.x + bounds.w && token.y >= bounds.y && token.y < bounds.y + bounds.h) ids.add(token.id);
+    return ids;
+  }, new Set());
 }
 
 function formatMonsterCr(monster) {
