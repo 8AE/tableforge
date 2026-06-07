@@ -9,14 +9,15 @@ The app is designed to run on one host machine. Projects are stored on that host
 
 ## Features
 
-- Create a board with custom tile width, tile height, and tile pixel size.
+- Create standard 5 ft square-grid boards or 50 ft hex-grid boards for large-scale ship and air combat.
+- Configure board cell width, cell height, and cell pixel size.
 - Upload a board background image and adjust its scale and opacity.
 - Keep a board background image fitted to the full board size as tile dimensions change.
 - Move the board background image on its own background layer.
 - Resize the board background image by dragging it in background edit mode.
 - Create, rename, delete, and open projects that contain saved boards. Project names must be unique.
 - Create multiple saved boards and publish the active board to the player viewer.
-- Place and move tokens on a tile grid where each tile represents 5 feet.
+- Place and move tokens on the active board grid, including standard 5 ft tokens and dedicated 50 ft hex tokens.
 - Edit selected tokens, including color and uploaded token artwork.
 - Open a project-wide token library overlay, edit saved library tokens, and import them onto any board in the project.
 - Search a 5e.tools bestiary, including custom locally hosted 5e.tools base URLs, and save monsters into the project token library.
@@ -25,7 +26,7 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Enable board lighting, manually reveal lit areas, draw light-blocking walls, and preview player visibility in the DM view.
 - Assign tokens to the player layer or DM-only layer.
 - Toggle token visibility.
-- Measure distance with a draggable ruler.
+- Measure distance with a draggable ruler using the active board scale.
 - Draw freehand annotations.
 - Draw, move, recolor, hide, and reveal annotations.
 - Manage tokens and drawings from collapsible DM sidebar lists.
@@ -80,6 +81,9 @@ npm run preview
 - The DM must create or open a project before the player viewer shows a board.
 - The DM starts on the project home screen, opens one project at a time, and can return home with **Project home**.
 - Projects are saved on the host machine in `data/projects.json`.
+- Existing boards use the standard 5 ft square grid. New boards can be created as either 5 ft square grids or 50 ft hex grids from the board drawer.
+- 50 ft hex boards render hexagon outlines and are intended for ship combat, air combat, and other large-scale scenes.
+- 50 ft hex tokens are a separate token type and occupy one 50 ft hex cell by default.
 - Use **Show active board to players** in the DM portal to transition the player viewer to a different board.
 - DM-layer tokens are visible in the DM portal but hidden from the player viewer.
 - DM-layer drawings can be prepared privately and later moved to the player layer or revealed.

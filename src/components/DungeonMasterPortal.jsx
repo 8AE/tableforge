@@ -35,7 +35,7 @@ import {
 import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
 import { Topbar } from './Topbar';
-import { boxesOverlap, defaultLighting, getBoard, getBoardEntity, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, tokenFootprint, uid, updateActiveBoard } from '../lib/board';
+import { areTokenAndBoardCompatible, boardGridLabel, boxesOverlap, defaultLighting, getBoard, getBoardEntity, GRID_HEX_50FT, incompatibleTokenGridMessage, isHexBoard, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, tokenFootprint, uid, updateActiveBoard } from '../lib/board';
 import { dungeonToBoard, normalizeDungeon } from '../lib/dungeon';
 
 export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
@@ -44,6 +44,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [layerNotice, setLayerNotice] = useState('');
   const [publishToast, setPublishToast] = useState('');
   const [tokenDraft, setTokenDraft] = useState({ label: 'Bandit', color: '#df5d52', size: 1, tokenKind: 'creature', vehicle: { width: 4, height: 3, backgroundImage: '', rotation: 0 } });
+  const [tokenGridError, setTokenGridError] = useState('');
   const [drawColor, setDrawColor] = useState('#36d399');
   const [drawLayer, setDrawLayer] = useState('player');
   const [selected, setSelected] = useState(null);
@@ -255,6 +256,15 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     fetchProjectAssets();
   }, [openProjectId]);
 
+  useEffect(() => {
+    setTokenGridError('');
+    setTokenDraft((draft) => {
+      if (isHexBoard(board) && draft.tokenKind !== 'hex50') return { ...draft, tokenKind: 'hex50', label: draft.label === 'Bandit' ? 'Ship' : draft.label, size: 1 };
+      if (!isHexBoard(board) && draft.tokenKind === 'hex50') return { ...draft, tokenKind: 'creature', label: draft.label === 'Ship' ? 'Bandit' : draft.label };
+      return draft;
+    });
+  }, [board.id, board.grid?.mode]);
+
   const uploadProjectAsset = async (file, category = assetCategory) => {
     if (!openProjectId || !file) return null;
     const form = new FormData();
@@ -321,6 +331,15 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const addToken = (point) => {
     const isVehicle = tokenDraft.tokenKind === 'vehicle';
+    const isHexToken = tokenDraft.tokenKind === 'hex50';
+    if (isHexBoard(board) && !isHexToken) {
+      setTokenGridError('Only 50 ft hex tokens can be placed on a 50 ft hex grid.');
+      return;
+    }
+    if (!isHexBoard(board) && isHexToken) {
+      setTokenGridError('50 ft hex tokens can only be placed on a 50 ft hex grid.');
+      return;
+    }
     const draftVehicle = {
       width: Number(tokenDraft.vehicle?.width) || 4,
       height: Number(tokenDraft.vehicle?.height) || 3,
@@ -331,11 +350,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       id: uid('token'),
       x: point.x,
       y: point.y,
-      tokenKind: isVehicle ? 'vehicle' : 'creature',
-      label: tokenDraft.label || (isVehicle ? 'Vehicle' : 'Token'),
+      tokenKind: isHexToken ? 'hex50' : isVehicle ? 'vehicle' : 'creature',
+      label: tokenDraft.label || (isHexToken ? 'Ship' : isVehicle ? 'Vehicle' : 'Token'),
       color: tokenDraft.color,
       layer: activeLayer === 'gm' ? 'dm' : 'player',
-      size: isVehicle ? Math.max(draftVehicle.width, draftVehicle.height) : Number(tokenDraft.size) || 1,
+      size: isHexToken ? 1 : isVehicle ? Math.max(draftVehicle.width, draftVehicle.height) : Number(tokenDraft.size) || 1,
       visible: true,
       visionEnabled: true,
       visionBrightFeet: 0,
@@ -345,6 +364,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       image: tokenDraft.image || '',
       vehicle: draftVehicle,
     };
+    setTokenGridError('');
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     selectTarget({ type: 'token', id: token.id }, activeLayer === 'gm' ? 'gm' : 'token');
   };
@@ -359,6 +379,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   };
 
   const importLibraryToken = (libraryToken) => {
+    if (!areTokenAndBoardCompatible(libraryToken, board)) {
+      setTokenGridError(incompatibleTokenGridMessage(libraryToken, board));
+      return;
+    }
     const token = {
       ...normalizeLibraryToken(libraryToken),
       id: uid('token'),
@@ -366,6 +390,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       y: 0,
       visible: true,
     };
+    setTokenGridError('');
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
   };
@@ -504,10 +529,16 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     selectTarget({ type: 'drawing', id: drawing.id }, drawing.layer === 'dm' ? 'gm' : 'token');
   };
 
-  const addBoard = () => {
-    const next = makeBoard(`Board ${state.boards.length + 1}`);
+  const addBoard = (gridMode = 'square-5ft') => {
+    const next = makeBoard(`Board ${state.boards.length + 1}`, gridMode);
     next.tokens = [];
     next.drawings = [];
+    if (gridMode === GRID_HEX_50FT) {
+      next.columns = 18;
+      next.rows = 14;
+      next.tileSize = 56;
+      next.name = `Hex Board ${state.boards.length + 1}`;
+    }
     setState((current) => ({ ...current, boards: [...current.boards, next], activeBoardId: next.id }));
   };
 
@@ -739,7 +770,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const pasteSelection = () => {
     if (!clipboard) return;
     if (clipboard.type === 'token') {
+      if (!areTokenAndBoardCompatible(clipboard.item, board)) {
+        setTokenGridError(incompatibleTokenGridMessage(clipboard.item, board));
+        return;
+      }
       const token = { ...clipboard.item, id: uid('token'), x: clipboard.item.x + 1, y: clipboard.item.y + 1 };
+      setTokenGridError('');
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
       selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
     }
@@ -1112,18 +1148,26 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             Name
             <input value={board.name} onChange={(event) => updateBoard({ name: event.target.value })} />
           </label>
+          <label>
+            Grid
+            <select value={board.grid?.mode || 'square-5ft'} onChange={(event) => updateBoard({ grid: { mode: event.target.value } })}>
+              <option value="square-5ft">Standard 5 ft square grid</option>
+              <option value="hex-50ft">50 ft hex grid</option>
+            </select>
+          </label>
           <div className="split">
             <label>
-              Tiles wide
+              Cells wide
               <input type="number" min="4" max="200" value={board.columns} onChange={(event) => updateBoard({ columns: Number(event.target.value) })} />
             </label>
             <label>
-              Tiles high
+              Cells high
               <input type="number" min="4" max="200" value={board.rows} onChange={(event) => updateBoard({ rows: Number(event.target.value) })} />
             </label>
           </div>
+          <p className="empty-note">{boardGridLabel(board)}</p>
           <label>
-            Tile pixels
+            Cell pixels
             <input type="range" min="24" max="72" value={board.tileSize} onChange={(event) => updateBoard({ tileSize: Number(event.target.value) })} />
           </label>
         </Panel>
@@ -1262,10 +1306,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           <label>
             Type
             <select value={tokenDraft.tokenKind || 'creature'} onChange={(event) => setTokenDraft({ ...tokenDraft, tokenKind: event.target.value })}>
-              <option value="creature">Standard token</option>
-              <option value="vehicle">Vehicle token</option>
+              {!isHexBoard(board) && <option value="creature">Standard token</option>}
+              {!isHexBoard(board) && <option value="vehicle">Vehicle token</option>}
+              {isHexBoard(board) && <option value="hex50">50 ft hex token</option>}
             </select>
           </label>
+          {tokenGridError && <p className="form-error">{tokenGridError}</p>}
           <label>
             Label
             <input value={tokenDraft.label} onChange={(event) => setTokenDraft({ ...tokenDraft, label: event.target.value })} />
@@ -1277,7 +1323,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             </label>
             <label>
               Size
-              <input type="number" min="1" max="6" value={tokenDraft.size} onChange={(event) => setTokenDraft({ ...tokenDraft, size: event.target.value })} disabled={tokenDraft.tokenKind === 'vehicle'} />
+              <input type="number" min="1" max="6" value={tokenDraft.tokenKind === 'hex50' ? 1 : tokenDraft.size} onChange={(event) => setTokenDraft({ ...tokenDraft, size: event.target.value })} disabled={tokenDraft.tokenKind === 'vehicle' || tokenDraft.tokenKind === 'hex50'} />
             </label>
           </div>
           {tokenDraft.tokenKind === 'vehicle' && (
@@ -1330,10 +1376,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                 <input type="color" value={selectedToken.color} onChange={(event) => updateToken(selectedToken.id, { color: event.target.value })} />
               </label>
               <label>
-                Size
-                <input type="number" min="1" max="6" value={selectedToken.size} onChange={(event) => updateToken(selectedToken.id, { size: Number(event.target.value) })} disabled={selectedToken.tokenKind === 'vehicle'} />
+              Size
+                <input type="number" min="1" max="6" value={selectedToken.tokenKind === 'hex50' ? 1 : selectedToken.size} onChange={(event) => updateToken(selectedToken.id, { size: Number(event.target.value) })} disabled={selectedToken.tokenKind === 'vehicle' || selectedToken.tokenKind === 'hex50'} />
               </label>
             </div>
+            {selectedToken.tokenKind === 'hex50' && <p className="empty-note">50 ft hex token · occupies one hex cell</p>}
             {selectedToken.tokenKind === 'vehicle' && (
               <div className="vehicle-editor">
                 <div className="split">
@@ -1369,7 +1416,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             )}
             <label className="file-button">
               <Image size={16} />
-              {isUploadingAsset ? 'Uploading image...' : selectedToken.tokenKind === 'vehicle' ? 'Vehicle background' : 'Token image'}
+              {isUploadingAsset ? 'Uploading image...' : selectedToken.tokenKind === 'vehicle' ? 'Vehicle background' : selectedToken.tokenKind === 'hex50' ? '50 ft token image' : 'Token image'}
               <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateToken(selectedToken.id, selectedToken.tokenKind === 'vehicle' ? { image: asset.path, vehicle: { ...(selectedToken.vehicle || {}), backgroundImage: asset.path } } : { image: asset.path }))} />
             </label>
             {imageAssets.length > 0 && (
@@ -1600,7 +1647,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                       <div>
                         <strong>{libraryToken.label}</strong>
                         <span>
-                          {libraryToken.layer} · {libraryToken.tokenKind === 'vehicle'
+                          {libraryToken.layer} · {libraryToken.tokenKind === 'hex50'
+                            ? '50 ft hex token'
+                            : libraryToken.tokenKind === 'vehicle'
                             ? `vehicle ${libraryToken.vehicle?.width || 1} x ${libraryToken.vehicle?.height || 1}`
                             : `size ${libraryToken.size} · vision ${libraryToken.visionFeet || 0} ft`}
                         </span>
@@ -1624,9 +1673,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                           </label>
                           <label>
                             Size
-                            <input type="number" min="1" max="6" value={libraryToken.size} onChange={(event) => updateLibraryToken(libraryToken.id, { size: Number(event.target.value) })} />
+                            <input type="number" min="1" max="6" value={libraryToken.tokenKind === 'hex50' ? 1 : libraryToken.size} onChange={(event) => updateLibraryToken(libraryToken.id, { size: Number(event.target.value) })} disabled={libraryToken.tokenKind === 'hex50'} />
                           </label>
                         </div>
+                        {libraryToken.tokenKind === 'hex50' && <p className="empty-note">50 ft hex token · import onto 50 ft hex boards only</p>}
                         {libraryToken.tokenKind === 'vehicle' && (
                           <div className="vehicle-editor">
                             <div className="split">
@@ -1646,7 +1696,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                         )}
                         <label className="file-button">
                           <Image size={16} />
-                          {isUploadingAsset ? 'Uploading image...' : libraryToken.tokenKind === 'vehicle' ? 'Vehicle background' : 'Token image'}
+                          {isUploadingAsset ? 'Uploading image...' : libraryToken.tokenKind === 'vehicle' ? 'Vehicle background' : libraryToken.tokenKind === 'hex50' ? '50 ft token image' : 'Token image'}
                           <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateLibraryToken(libraryToken.id, libraryToken.tokenKind === 'vehicle' ? { image: asset.path, vehicle: { ...(libraryToken.vehicle || {}), backgroundImage: asset.path } } : { image: asset.path }))} />
                         </label>
                         {imageAssets.length > 0 && (

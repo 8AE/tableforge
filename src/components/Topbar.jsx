@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Copy, Expand, Home, Plus, RotateCcw, RotateCw, Search, Settings, Trash2, Users } from 'lucide-react';
-import { tileFeet } from '../lib/board';
+import { boardGridLabel } from '../lib/board';
 
 const layerOptions = [
   ['map', 'Map'],
@@ -42,7 +42,7 @@ export function Topbar({
           title="Open page drawer"
         >
           <strong>{board.name}</strong>
-          <span>{board.columns} x {board.rows} tiles · {tileFeet} ft grid</span>
+          <span>{board.columns} x {board.rows} cells · {boardGridLabel(board)}</span>
         </button>
         {mode === 'dm' && (
           <div className="layer-switcher" aria-label="Active layer">
@@ -102,7 +102,7 @@ export function Topbar({
                 </button>
                 <div className="page-card-meta">
                   <strong>{item.name}</strong>
-                  <span>{item.columns} x {item.rows} · {item.id === playerBoardId ? 'Published' : 'DM only'}</span>
+                  <span>{item.columns} x {item.rows} · {boardGridLabel(item)} · {item.id === playerBoardId ? 'Published' : 'DM only'}</span>
                 </div>
                 <div className="page-card-actions">
                   <button type="button" title="Board settings" onClick={() => onBoardSelect?.(item.id)}><Settings size={14} /></button>
@@ -117,7 +117,8 @@ export function Topbar({
                 <span>Add New Board</span>
               </div>
               <div className="add-page-actions">
-                <button type="button" onClick={onAddBoard}>Blank Board</button>
+                <button type="button" onClick={() => onAddBoard?.('square-5ft')}>5 ft Square Board</button>
+                <button type="button" onClick={() => onAddBoard?.('hex-50ft')}>50 ft Hex Board</button>
                 <button type="button" onClick={onImportBoard}>Import from Dungeon Builder</button>
                 <button type="button" onClick={onImportFiveEToolsMap}>Import from 5e.tools</button>
               </div>

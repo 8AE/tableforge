@@ -1,6 +1,12 @@
 export const STORAGE_KEY = 'tableforge-board-state';
 export const CHANNEL_KEY = 'tableforge-board-sync';
 export const tileFeet = 5;
+export const GRID_SQUARE_5FT = 'square-5ft';
+export const GRID_HEX_50FT = 'hex-50ft';
+export const gridModes = {
+  [GRID_SQUARE_5FT]: { label: '5 ft square grid', feetPerCell: 5, shape: 'square' },
+  [GRID_HEX_50FT]: { label: '50 ft hex grid', feetPerCell: 50, shape: 'hex', orientation: 'pointy-top' },
+};
 export const defaultLighting = {
   enabled: false,
   darkness: 1,
@@ -20,10 +26,12 @@ export function uid(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function makeBoard(name = 'Blackstone Crossing') {
+export function makeBoard(name = 'Blackstone Crossing', gridMode = GRID_SQUARE_5FT) {
+  const grid = normalizeGrid({ mode: gridMode });
   return {
     id: uid('board'),
     name,
+    grid,
     columns: 24,
     rows: 16,
     tileSize: 42,
@@ -96,6 +104,7 @@ export function migrateState(raw) {
       tokenLibrary: (raw.tokenLibrary || []).map((token) => normalizeLibraryToken(token)),
       boards: raw.boards.map((board) => ({
         ...board,
+        grid: normalizeGrid(board.grid || { mode: board.gridMode }),
         lighting: {
           ...defaultLighting,
           ...board.lighting,
@@ -115,6 +124,7 @@ export function migrateState(raw) {
     const migrated = {
       id: uid('board'),
       ...raw.board,
+      grid: normalizeGrid(raw.board.grid || { mode: raw.board.gridMode }),
       background: {
         src: raw.board.background || '',
         type: 'image',
@@ -137,7 +147,7 @@ export function migrateState(raw) {
 }
 
 export function normalizeLibraryToken(token = {}) {
-  const tokenKind = token.tokenKind === 'vehicle' ? 'vehicle' : 'creature';
+  const tokenKind = normalizeTokenKind(token.tokenKind);
   const vehicle = normalizeVehicleToken(token.vehicle, token);
   return {
     id: token.id || uid('library-token'),
@@ -160,7 +170,7 @@ export function normalizeLibraryToken(token = {}) {
 }
 
 export function normalizeBoardToken(token = {}) {
-  const tokenKind = token.tokenKind === 'vehicle' ? 'vehicle' : 'creature';
+  const tokenKind = normalizeTokenKind(token.tokenKind);
   return {
     ...entityBase('token', token),
     visionFeet: 0,
@@ -191,6 +201,7 @@ export function normalizeVehicleToken(vehicle = {}, token = {}) {
 }
 
 export function tokenFootprint(token = {}) {
+  if (token.tokenKind === 'hex50') return { width: 1, height: 1, cells: [{ x: 0, y: 0 }] };
   if (token.tokenKind === 'vehicle') {
     const vehicle = normalizeVehicleToken(token.vehicle, token);
     if (vehicle.rotation === 90 || vehicle.rotation === 270) {
@@ -200,6 +211,126 @@ export function tokenFootprint(token = {}) {
   }
   const size = Number(token.size) || 1;
   return { width: size, height: size };
+}
+
+export function normalizeGrid(grid = {}) {
+  const mode = gridModes[grid.mode] ? grid.mode : GRID_SQUARE_5FT;
+  return {
+    mode,
+    shape: gridModes[mode].shape,
+    feetPerCell: gridModes[mode].feetPerCell,
+    orientation: gridModes[mode].orientation || 'orthogonal',
+  };
+}
+
+export function normalizeBoard(board = {}) {
+  return {
+    ...board,
+    grid: normalizeGrid(board.grid || { mode: board.gridMode }),
+    background: normalizeBackground(board.background),
+    lighting: {
+      ...defaultLighting,
+      ...board.lighting,
+      hiddenReveals: board.lighting?.hiddenReveals || [],
+      walls: (board.lighting?.walls || []).map((wall) => normalizeWall(wall)),
+    },
+    tokens: (board.tokens || []).map((token) => normalizeBoardToken(token)),
+    drawings: (board.drawings || []).map((drawing) => normalizeDrawing(drawing)),
+    doors: normalizeDoors(board.doors || board.dungeonMetadata?.doors || []),
+  };
+}
+
+export function normalizeTokenKind(tokenKind) {
+  if (tokenKind === 'vehicle') return 'vehicle';
+  if (tokenKind === 'hex50') return 'hex50';
+  return 'creature';
+}
+
+export function isHexBoard(board = {}) {
+  return normalizeGrid(board.grid || { mode: board.gridMode }).mode === GRID_HEX_50FT;
+}
+
+export function boardFeetPerCell(board = {}) {
+  return normalizeGrid(board.grid || { mode: board.gridMode }).feetPerCell;
+}
+
+export function boardGridLabel(board = {}) {
+  return gridModes[normalizeGrid(board.grid || { mode: board.gridMode }).mode].label;
+}
+
+export function areTokenAndBoardCompatible(token = {}, board = {}) {
+  const tokenKind = normalizeTokenKind(token.tokenKind);
+  return isHexBoard(board) ? tokenKind === 'hex50' : tokenKind !== 'hex50';
+}
+
+export function incompatibleTokenGridMessage(token = {}, board = {}) {
+  const tokenLabel = normalizeTokenKind(token.tokenKind) === 'hex50' ? '50 ft hex token' : normalizeTokenKind(token.tokenKind) === 'vehicle' ? 'vehicle token' : 'standard token';
+  return `${tokenLabel} cannot be added to a ${boardGridLabel(board)}.`;
+}
+
+export function boardPixelSize(board = {}) {
+  const tile = Number(board.tileSize) || 42;
+  if (isHexBoard(board)) {
+    return {
+      width: (Number(board.columns || 0) + 0.5) * tile,
+      height: ((Number(board.rows || 0) * 0.75) + 0.25) * tile,
+    };
+  }
+  return {
+    width: (Number(board.columns || 0) * tile),
+    height: (Number(board.rows || 0) * tile),
+  };
+}
+
+export function cellCenter(cell = {}, board = {}) {
+  if (isHexBoard(board)) {
+    const row = Number(cell.y) || 0;
+    const col = Number(cell.x) || 0;
+    return {
+      x: col + 0.5 + ((row % 2) * 0.5),
+      y: row * 0.75 + 0.5,
+    };
+  }
+  return {
+    x: (Number(cell.x) || 0) + 0.5,
+    y: (Number(cell.y) || 0) + 0.5,
+  };
+}
+
+export function cellCenterPixels(cell = {}, board = {}) {
+  const center = cellCenter(cell, board);
+  const tile = Number(board.tileSize) || 42;
+  return { x: center.x * tile, y: center.y * tile };
+}
+
+export function tokenPixelBox(token = {}, board = {}) {
+  const tile = Number(board.tileSize) || 42;
+  const footprint = tokenFootprint(token);
+  if (isHexBoard(board) && token.tokenKind === 'hex50') {
+    const center = cellCenterPixels(token, board);
+    return {
+      left: center.x - tile / 2,
+      top: center.y - tile / 2,
+      width: tile,
+      height: tile,
+    };
+  }
+  return {
+    left: (Number(token.x) || 0) * tile,
+    top: (Number(token.y) || 0) * tile,
+    width: footprint.width * tile,
+    height: footprint.height * tile,
+  };
+}
+
+export function hexPolygonPoints(cell = {}, board = {}) {
+  const tile = Number(board.tileSize) || 42;
+  const center = cellCenterPixels(cell, board);
+  const radius = tile / 2;
+  return Array.from({ length: 6 }, (_, index) => {
+    const angle = (-90 + index * 60) * (Math.PI / 180);
+    return `${center.x + Math.cos(angle) * radius},${center.y + Math.sin(angle) * radius}`;
+  }).join(' ');
 }
 
 function clampVehicleDimension(value) {
@@ -299,16 +430,46 @@ export function normalizeBackground(background) {
 }
 
 export function snapToTile(point, board) {
+  if (isHexBoard(board)) {
+    const approximateRow = Math.round((point.y - 0.5) / 0.75);
+    const candidates = [];
+    for (let row = approximateRow - 2; row <= approximateRow + 2; row += 1) {
+      for (let col = Math.round(point.x - 0.5 - ((row % 2) * 0.5)) - 2; col <= Math.round(point.x - 0.5 - ((row % 2) * 0.5)) + 2; col += 1) {
+        if (row >= 0 && row < board.rows && col >= 0 && col < board.columns) candidates.push({ x: col, y: row });
+      }
+    }
+    return candidates.sort((a, b) => {
+      const ac = cellCenter(a, board);
+      const bc = cellCenter(b, board);
+      return ((point.x - ac.x) ** 2 + (point.y - ac.y) ** 2) - ((point.x - bc.x) ** 2 + (point.y - bc.y) ** 2);
+    })[0] || { x: 0, y: 0 };
+  }
   return {
     x: Math.max(0, Math.min(board.columns - 1, Math.floor(point.x))),
     y: Math.max(0, Math.min(board.rows - 1, Math.floor(point.y))),
   };
 }
 
-export function feetBetween(a, b) {
+export function feetBetween(a, b, board = {}) {
+  if (isHexBoard(board)) {
+    return hexDistance(a, b) * boardFeetPerCell(board);
+  }
   const dx = b.x - a.x;
   const dy = b.y - a.y;
-  return Math.round(Math.sqrt(dx * dx + dy * dy) * tileFeet);
+  return Math.round(Math.sqrt(dx * dx + dy * dy) * boardFeetPerCell(board));
+}
+
+export function hexDistance(a = {}, b = {}) {
+  const ac = offsetToCube(Number(a.x) || 0, Number(a.y) || 0);
+  const bc = offsetToCube(Number(b.x) || 0, Number(b.y) || 0);
+  return Math.max(Math.abs(ac.x - bc.x), Math.abs(ac.y - bc.y), Math.abs(ac.z - bc.z));
+}
+
+function offsetToCube(col, row) {
+  const x = col - ((row - (row & 1)) / 2);
+  const z = row;
+  const y = -x - z;
+  return { x, y, z };
 }
 
 export function shapeBox(drawing) {
@@ -325,18 +486,19 @@ export function shapeBox(drawing) {
   return { x, y, w, h };
 }
 
-export function shapeMeasurement(drawing) {
+export function shapeMeasurement(drawing, board = {}) {
   const box = shapeBox(drawing);
+  const feetPerCell = boardFeetPerCell(board);
   if (drawing.shape === 'circle') {
-    return `${Math.max(box.w, box.h) * tileFeet} ft dia`;
+    return `${Math.max(box.w, box.h) * feetPerCell} ft dia`;
   }
   if (drawing.shape === 'cone') {
-    return `${feetBetween(drawing.start, drawing.end)} ft cone`;
+    return `${feetBetween(drawing.start, drawing.end, board)} ft cone`;
   }
   if (drawing.shape === 'square') {
-    return `${Math.max(box.w, box.h) * tileFeet} ft sq`;
+    return `${Math.max(box.w, box.h) * feetPerCell} ft sq`;
   }
-  return `${box.w * tileFeet} x ${box.h * tileFeet} ft`;
+  return `${box.w * feetPerCell} x ${box.h * feetPerCell} ft`;
 }
 
 export function coneTemplate(drawing) {
@@ -466,6 +628,15 @@ export function wallEndpoints(wall, tile) {
   };
 }
 
+export function tokenCenter(token = {}, board = {}) {
+  if (isHexBoard(board) && token.tokenKind === 'hex50') return cellCenter(token, board);
+  const footprint = tokenFootprint(token);
+  return {
+    x: (Number(token.x) || 0) + footprint.width / 2,
+    y: (Number(token.y) || 0) + footprint.height / 2,
+  };
+}
+
 export function isPointNearWall(point, wall) {
   const offset = wall.freeform ? 0 : 0.5;
   const start = { x: wall.start.x + offset, y: wall.start.y + offset };
@@ -480,14 +651,12 @@ export function isPointNearWall(point, wall) {
   return Math.hypot(point.x - closest.x, point.y - closest.y) <= 0.28;
 }
 
-export function visionPolygonPoints(token, walls, tile, radiusFeet = token.visionFeet) {
-  const radius = (Number(radiusFeet) / tileFeet) * tile;
+export function visionPolygonPoints(token, walls, tile, radiusFeet = token.visionFeet, board = {}) {
+  const radius = (Number(radiusFeet) / boardFeetPerCell(board)) * tile;
   if (!radius) return '';
 
-  const origin = {
-    x: (token.x + token.size / 2) * tile,
-    y: (token.y + token.size / 2) * tile,
-  };
+  const center = tokenCenter(token, board);
+  const origin = { x: center.x * tile, y: center.y * tile };
   const wallSegments = (walls || []).map((wall) => wallEndpoints(wall, tile));
   const angles = [];
   const baseRayCount = 112;

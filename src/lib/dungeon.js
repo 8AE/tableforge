@@ -1,4 +1,4 @@
-import { uid } from './board';
+import { GRID_SQUARE_5FT, uid } from './board';
 
 export const dungeonTileSize = 50;
 export const dungeonTools = ['floor', 'door', 'stairs', 'difficult', 'water', 'erase'];
@@ -109,6 +109,7 @@ export function dungeonToBoard(dungeon) {
   return {
     id: uid('board'),
     name: normalized.name,
+    grid: { mode: GRID_SQUARE_5FT, shape: 'square', feetPerCell: 5, orientation: 'orthogonal' },
     columns: normalized.gridSize.width,
     rows: normalized.gridSize.height,
     tileSize: 42,

@@ -1,9 +1,13 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  boardPixelSize,
+  cellCenterPixels,
   coneTemplate,
   feetBetween,
+  hexPolygonPoints,
   isPointInDrawing,
   isPointNearWall,
+  isHexBoard,
   normalizeBackground,
   offsetEntity,
   offsetDrawing,
@@ -12,7 +16,9 @@ import {
   shapeBox,
   shapeMeasurement,
   snapToTile,
+  tokenCenter,
   tokenFootprint,
+  tokenPixelBox,
   uid,
   visionPolygonPoints,
   wallEndpoints,
@@ -58,8 +64,10 @@ export function BoardCanvas({
   const [fitScale, setFitScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const tile = board.tileSize;
-  const width = board.columns * tile;
-  const height = board.rows * tile;
+  const boardSize = boardPixelSize(board);
+  const width = boardSize.width;
+  const height = boardSize.height;
+  const hexBoard = isHexBoard(board);
   const scale = fitScale * playerZoom;
   const normalizedRotation = ((playerRotation % 360) + 360) % 360;
   const isRotatedSideways = normalizedRotation === 90 || normalizedRotation === 270;
@@ -111,21 +119,21 @@ export function BoardCanvas({
   const brightPolygons = useMemo(() => (
     playerTokens
       .filter((token) => token.visionEnabled !== false && Number(token.visionBrightFeet ?? token.visionFeet) > 0)
-        .map((token) => ({ id: `vision-bright-${token.id}`, points: visionPolygonPoints(token, activeLightingWalls, tile, token.visionBrightFeet ?? token.visionFeet) }))
+        .map((token) => ({ id: `vision-bright-${token.id}`, points: visionPolygonPoints(token, activeLightingWalls, tile, token.visionBrightFeet ?? token.visionFeet, board) }))
   ), [activeLightingWalls, playerTokens, tile]);
   const dimPolygons = useMemo(() => (
     playerTokens
       .filter((token) => token.visionEnabled !== false && Number(token.visionDimFeet ?? token.visionFeet) > 0)
-        .map((token) => ({ id: `vision-dim-${token.id}`, points: visionPolygonPoints(token, activeLightingWalls, tile, token.visionDimFeet ?? token.visionFeet) }))
+        .map((token) => ({ id: `vision-dim-${token.id}`, points: visionPolygonPoints(token, activeLightingWalls, tile, token.visionDimFeet ?? token.visionFeet, board) }))
   ), [activeLightingWalls, playerTokens, tile]);
   const lightPolygons = useMemo(() => {
     const playerVision = [...brightPolygons, ...dimPolygons];
     return board.tokens
       .filter((token) => token.visible !== false && (Number(token.lightBrightFeet) > 0 || Number(token.lightDimFeet) > 0))
-      .filter((token) => token.layer === 'player' || pointIsInAnyPolygon(tokenCenterPixels(token, tile), playerVision))
+      .filter((token) => token.layer === 'player' || pointIsInAnyPolygon(tokenCenterPixels(token, board), playerVision))
       .flatMap((token) => [
-        Number(token.lightBrightFeet) > 0 ? { id: `light-bright-${token.id}`, tone: 'bright', points: visionPolygonPoints(token, activeLightingWalls, tile, token.lightBrightFeet) } : null,
-        Number(token.lightDimFeet) > 0 ? { id: `light-dim-${token.id}`, tone: 'dim', points: visionPolygonPoints(token, activeLightingWalls, tile, token.lightDimFeet) } : null,
+        Number(token.lightBrightFeet) > 0 ? { id: `light-bright-${token.id}`, tone: 'bright', points: visionPolygonPoints(token, activeLightingWalls, tile, token.lightBrightFeet, board) } : null,
+        Number(token.lightDimFeet) > 0 ? { id: `light-dim-${token.id}`, tone: 'dim', points: visionPolygonPoints(token, activeLightingWalls, tile, token.lightDimFeet, board) } : null,
       ].filter(Boolean));
   }, [activeLightingWalls, board.tokens, brightPolygons, dimPolygons, tile]);
   const allBrightPolygons = useMemo(() => [...brightPolygons, ...lightPolygons.filter((item) => item.tone === 'bright')], [brightPolygons, lightPolygons]);
@@ -136,7 +144,7 @@ export function BoardCanvas({
   }, [allDimPolygons, doors, lighting.enabled, tile, view]);
   const visibleTokens = useMemo(() => {
     if (view === 'dm' || !lighting.enabled) return dmTokens;
-    return dmTokens.filter((token) => tokenHasVision(token) || tokenIsInRevealedLight(token, lighting, allDimPolygons, tile));
+    return dmTokens.filter((token) => tokenHasVision(token) || tokenIsInRevealedLight(token, lighting, allDimPolygons, board));
   }, [allDimPolygons, dmTokens, lighting, tile, view]);
 
   useEffect(() => {
@@ -218,6 +226,10 @@ export function BoardCanvas({
 
   const tokenAt = (point) => [...activeCanvasTokens]
     .filter((token) => {
+      if (hexBoard && token.tokenKind === 'hex50') {
+        const center = cellCenterPixels(token, board);
+        return Math.hypot(point.px - center.x, point.py - center.y) <= tile / 2;
+      }
       const footprint = tokenFootprint(token);
       return point.x >= token.x && point.x <= token.x + footprint.width && point.y >= token.y && point.y <= token.y + footprint.height;
     })
@@ -398,10 +410,12 @@ export function BoardCanvas({
     if (drag.type === 'token') {
       const draggedToken = activeCanvasTokens.find((token) => token.id === drag.id);
       const footprint = tokenFootprint(draggedToken);
-      const preview = {
-        x: Math.max(0, Math.min(board.columns - footprint.width, Math.floor(point.x - drag.offset.x))),
-        y: Math.max(0, Math.min(board.rows - footprint.height, Math.floor(point.y - drag.offset.y))),
-      };
+      const preview = hexBoard && draggedToken?.tokenKind === 'hex50'
+        ? snapped
+        : {
+            x: Math.max(0, Math.min(board.columns - footprint.width, Math.floor(point.x - drag.offset.x))),
+            y: Math.max(0, Math.min(board.rows - footprint.height, Math.floor(point.y - drag.offset.y))),
+          };
       setDrag({
         ...drag,
         preview,
@@ -565,7 +579,7 @@ export function BoardCanvas({
       });
     }
     if (drag.type === 'ruler') {
-      if (feetBetween(drag.start, drag.end) > 0) {
+      if (feetBetween(drag.start, drag.end, board) > 0) {
         onAddDrawing({
           id: uid('measure'),
           type: 'measurement',
@@ -610,14 +624,14 @@ export function BoardCanvas({
     tokens: displayTokens,
     drawings: displayDrawings,
     doors: displayDoors,
-  }, tile);
+  }, tile, board);
   const liveMarquee = drag?.type === 'marquee' ? marqueeBounds(drag) : null;
 
   return (
     <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
       <div className="board-stage" style={{ width: stageWidth, height: stageHeight }}>
         <div
-          className={`board active-layer-${activeLayer} ${fitToViewport ? 'board-fit' : ''}`}
+          className={`board active-layer-${activeLayer} ${hexBoard ? 'board-hex-grid' : ''} ${fitToViewport ? 'board-fit' : ''}`}
           style={{
             width,
             height,
@@ -705,9 +719,10 @@ export function BoardCanvas({
                 {allBrightPolygons.map((token) => <polygon key={`bright-${token.id}`} points={token.points} fill="black" />)}
               </mask>
             </defs>
-            {displayDrawings.map((drawing) => renderDrawing(drawing, tile, selected, isSelected('drawing', drawing.id), boardObjectMotion.drawings[drawing.id]))}
-            {boardObjectMotion.exiting.drawings.map((drawing) => renderDrawing(drawing, tile, null, false, { className: 'player-object-exit player-svg-motion' }, `exiting-drawing-${drawing.id}`))}
-            {liveDrawing.map((drawing) => renderDrawing(drawing, tile, selected, isSelected('drawing', drawing.id)))}
+            {renderBoardGrid(board)}
+            {displayDrawings.map((drawing) => renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id), boardObjectMotion.drawings[drawing.id]))}
+            {boardObjectMotion.exiting.drawings.map((drawing) => renderDrawing(drawing, tile, board, null, false, { className: 'player-object-exit player-svg-motion' }, `exiting-drawing-${drawing.id}`))}
+            {liveDrawing.map((drawing) => renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id)))}
             {view === 'dm' && displayWalls.map((wall) => renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id)))}
             {displayDoors.map((door) => renderDoor(door, tile, view, isSelected('door', door.id), boardObjectMotion.doors[door.id]))}
             {boardObjectMotion.exiting.doors.map((door) => renderDoor(door, tile, view, false, { className: 'player-object-exit player-door-motion' }, `exiting-door-${door.id}`))}
@@ -720,8 +735,8 @@ export function BoardCanvas({
                 height={liveMarquee.h * tile}
               />
             )}
-            {board.liveMeasurement && drag?.type !== 'ruler' && renderLiveShape({ type: 'ruler', ...board.liveMeasurement }, tile)}
-            {liveShape && renderLiveShape(liveShape, tile)}
+            {board.liveMeasurement && drag?.type !== 'ruler' && renderLiveShape({ type: 'ruler', ...board.liveMeasurement }, tile, board)}
+            {liveShape && renderLiveShape(liveShape, tile, board)}
             {lighting.enabled && (
               <>
                 <rect
@@ -753,8 +768,10 @@ export function BoardCanvas({
               ? { className: 'player-object-exit player-token-motion' }
               : boardObjectMotion.tokens[token.id] || {};
             const footprint = tokenFootprint(token);
+            const tokenBox = tokenPixelBox(token, board);
             const vehicleImage = token.vehicle?.backgroundImage || token.image;
             const isVehicle = token.tokenKind === 'vehicle';
+            const isHexToken = token.tokenKind === 'hex50';
             const vehicleRotation = token.vehicle?.rotation || 0;
             const vehicleRotatesSideways = vehicleRotation === 90 || vehicleRotation === 270;
             const vehicleSurfaceWidth = (vehicleRotatesSideways ? footprint.height : footprint.width) * tile;
@@ -765,12 +782,12 @@ export function BoardCanvas({
             return (
             <button
               key={token.exiting ? `exiting-token-${token.id}` : token.id}
-              className={`map-token token-${token.layer} ${token.image && !isVehicle ? 'token-image' : ''} ${isVehicle ? 'vehicle-token' : ''} ${isVehicle && view === 'player' ? 'vehicle-token-player' : ''} ${vehicleImage && isVehicle ? 'has-vehicle-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''} ${motion.className || ''}`}
+              className={`map-token token-${token.layer} ${token.image && !isVehicle ? 'token-image' : ''} ${isVehicle ? 'vehicle-token' : ''} ${isHexToken ? 'hex50-token' : ''} ${isVehicle && view === 'player' ? 'vehicle-token-player' : ''} ${vehicleImage && isVehicle ? 'has-vehicle-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''} ${motion.className || ''}`}
               style={{
-                left: token.x * tile,
-                top: token.y * tile,
-                width: footprint.width * tile,
-                height: footprint.height * tile,
+                left: tokenBox.left,
+                top: tokenBox.top,
+                width: tokenBox.width,
+                height: tokenBox.height,
                 backgroundColor: token.image || isVehicle ? 'transparent' : token.color,
                 '--tile-size': `${tile}px`,
                 '--vehicle-surface-width': `${vehicleSurfaceWidth}px`,
@@ -858,7 +875,21 @@ function nearestDoorEdge(localX, localY, cell) {
   ].sort((a, b) => a.distance - b.distance)[0];
 }
 
-function renderDrawing(drawing, tile, selected, selectedOverride = false, motion = {}, keyOverride = null) {
+function renderBoardGrid(board) {
+  const tile = Number(board.tileSize) || 42;
+  if (isHexBoard(board)) {
+    const cells = [];
+    for (let y = 0; y < board.rows; y += 1) {
+      for (let x = 0; x < board.columns; x += 1) {
+        cells.push(<polygon key={`hex-${x}-${y}`} className="hex-grid-cell" points={hexPolygonPoints({ x, y }, board)} />);
+      }
+    }
+    return <g className="hex-grid-layer">{cells}</g>;
+  }
+  return null;
+}
+
+function renderDrawing(drawing, tile, board, selected, selectedOverride = false, motion = {}, keyOverride = null) {
   const isSelected = selectedOverride || (selected?.type === 'drawing' && selected.id === drawing.id);
   const className = `${drawing.layer === 'dm' ? 'drawing-gm' : 'drawing-player'} ${isSelected ? 'selected-drawing' : ''} ${motion.className || ''}`.trim();
   if (drawing.type === 'path') {
@@ -878,18 +909,20 @@ function renderDrawing(drawing, tile, selected, selectedOverride = false, motion
     );
   }
   if (drawing.type === 'measurement') {
-    return renderMeasurement(drawing, tile, isSelected, motion, keyOverride);
+    return renderMeasurement(drawing, tile, board, isSelected, motion, keyOverride);
   }
-  return renderStoredShape(drawing, tile, isSelected, motion, keyOverride);
+  return renderStoredShape(drawing, tile, board, isSelected, motion, keyOverride);
 }
 
-function renderMeasurement(drawing, tile, isSelected = false, motion = {}, keyOverride = null) {
+function renderMeasurement(drawing, tile, board, isSelected = false, motion = {}, keyOverride = null) {
   const start = drawing.start;
   const end = drawing.end;
-  const x1 = (start.x + 0.5) * tile;
-  const y1 = (start.y + 0.5) * tile;
-  const x2 = (end.x + 0.5) * tile;
-  const y2 = (end.y + 0.5) * tile;
+  const startCenter = cellCenterPixels(start, board);
+  const endCenter = cellCenterPixels(end, board);
+  const x1 = startCenter.x;
+  const y1 = startCenter.y;
+  const x2 = endCenter.x;
+  const y2 = endCenter.y;
   return (
     <g key={keyOverride || drawing.id} className={`${isSelected ? 'selected-drawing' : ''} ${motion.className || ''}`.trim()} style={motion.style}>
       <line
@@ -902,12 +935,12 @@ function renderMeasurement(drawing, tile, isSelected = false, motion = {}, keyOv
         strokeLinecap="round"
         markerEnd="url(#arrow)"
       />
-      <MeasureLabel x={(x1 + x2) / 2 + 8} y={(y1 + y2) / 2 - 8} text={`${feetBetween(start, end)} ft`} />
+      <MeasureLabel x={(x1 + x2) / 2 + 8} y={(y1 + y2) / 2 - 8} text={`${feetBetween(start, end, board)} ft`} />
     </g>
   );
 }
 
-function renderStoredShape(drawing, tile, isSelected = false, motion = {}, keyOverride = null) {
+function renderStoredShape(drawing, tile, board, isSelected = false, motion = {}, keyOverride = null) {
   const box = shapeBox(drawing);
   const x = box.x * tile;
   const y = box.y * tile;
@@ -920,7 +953,7 @@ function renderStoredShape(drawing, tile, isSelected = false, motion = {}, keyOv
     stroke: drawing.color,
     strokeWidth: isSelected ? drawing.strokeWidth + 2 : drawing.strokeWidth,
   };
-  const label = shapeMeasurement(drawing);
+  const label = shapeMeasurement(drawing, board);
 
   if (drawing.shape === 'circle') {
     return (
@@ -951,7 +984,7 @@ function renderStoredShape(drawing, tile, isSelected = false, motion = {}, keyOv
   );
 }
 
-function renderLiveShape(shape, tile) {
+function renderLiveShape(shape, tile, board) {
   const start = shape.start;
   const end = shape.end;
   if (shape.type === 'wall') {
@@ -962,7 +995,7 @@ function renderLiveShape(shape, tile) {
     return <rect key="live-light" className={shape.type === 'light-hide' ? 'live-light-hide' : 'live-light-reveal'} x={box.x * tile} y={box.y * tile} width={box.w * tile} height={box.h * tile} rx="4" />;
   }
   if (shape.type === 'ruler') {
-    return renderMeasurement({ id: 'live-ruler', type: 'measurement', start, end, color: '#f8fafc', strokeWidth: 4 }, tile);
+    return renderMeasurement({ id: 'live-ruler', type: 'measurement', start, end, color: '#f8fafc', strokeWidth: 4 }, tile, board);
   }
   return renderStoredShape({
     id: 'live-shape',
@@ -973,7 +1006,7 @@ function renderLiveShape(shape, tile) {
     strokeWidth: 3,
     start,
     end,
-  }, tile);
+  }, tile, board);
 }
 
 function renderLightingWall(wall, tile, selected = null, isLive = false, selectedOverride = false) {
@@ -1045,7 +1078,7 @@ function visibleTokensForLayer(tokens, activeLayer) {
   return [];
 }
 
-function useBoardObjectMotion(enabled, collections, tile) {
+function useBoardObjectMotion(enabled, collections, tile, board) {
   const previousRef = useRef(null);
   const clearTimerRef = useRef(null);
   const [motion, setMotion] = useState(emptyMotionState);
@@ -1062,7 +1095,7 @@ function useBoardObjectMotion(enabled, collections, tile) {
       return undefined;
     }
 
-    const current = snapshotBoardObjects(collections, tile);
+    const current = snapshotBoardObjects(collections, tile, board);
     const previous = previousRef.current;
     previousRef.current = current;
 
@@ -1078,7 +1111,7 @@ function useBoardObjectMotion(enabled, collections, tile) {
       setMotion(emptyMotionState());
     }, 360);
     return undefined;
-  }, [enabled, collections.tokens, collections.drawings, collections.doors, tile]);
+  }, [enabled, collections.tokens, collections.drawings, collections.doors, tile, board]);
 
   return motion;
 }
@@ -1107,13 +1140,10 @@ function hasMotionState(state) {
   );
 }
 
-function snapshotBoardObjects(collections, tile) {
+function snapshotBoardObjects(collections, tile, board) {
   return {
     tokens: snapshotById(collections.tokens, (token) => ({
-      center: {
-        x: (token.x + tokenFootprint(token).width / 2) * tile,
-        y: (token.y + tokenFootprint(token).height / 2) * tile,
-      },
+      center: tokenCenterPixels(token, board),
       item: cloneBoardObject(token),
     })),
     drawings: snapshotById(collections.drawings, (drawing) => ({
@@ -1206,11 +1236,9 @@ function tokenHasVision(token) {
   return token.visionEnabled !== false && (Number(token.visionBrightFeet ?? token.visionFeet) > 0 || Number(token.visionDimFeet ?? token.visionFeet) > 0);
 }
 
-function tokenIsInRevealedLight(token, lighting, visionPolygons, tile) {
-  const point = {
-    x: token.x + token.size / 2,
-    y: token.y + token.size / 2,
-  };
+function tokenIsInRevealedLight(token, lighting, visionPolygons, board) {
+  const point = tokenCenter(token, board);
+  const tile = Number(board.tileSize) || 42;
   const inReveal = (lighting.reveals || []).some((reveal) => pointInBox(point, revealBox(reveal)));
   const hiddenByReveal = (lighting.hiddenReveals || []).some((reveal) => pointInBox(point, revealBox(reveal)));
   if (inReveal && !hiddenByReveal) return true;
@@ -1221,11 +1249,10 @@ function tokenIsInRevealedLight(token, lighting, visionPolygons, tile) {
   ));
 }
 
-function tokenCenterPixels(token, tile) {
-  return {
-    x: (token.x + token.size / 2) * tile,
-    y: (token.y + token.size / 2) * tile,
-  };
+function tokenCenterPixels(token, board) {
+  const center = tokenCenter(token, board);
+  const tile = Number(board.tileSize) || 42;
+  return { x: center.x * tile, y: center.y * tile };
 }
 
 function pointIsInAnyPolygon(point, polygons) {
