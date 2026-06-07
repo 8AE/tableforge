@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Tableforge DM Tutorial</title>
+  <style>
+    @page {
+      size: Letter;
+      margin: 0.58in 0.64in 0.62in;
+    }
+
+    :root {
+      --ink: #18202a;
+      --muted: #5d6876;
+      --line: #d8dee7;
+      --soft: #f3f6f9;
+      --accent: #0f766e;
+      --accent-dark: #115e59;
+      --gold: #b7791f;
+      --dark: #111827;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10.6pt;
+      line-height: 1.46;
+      background: white;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      color: var(--dark);
+      line-height: 1.18;
+      page-break-after: avoid;
+    }
+
+    h1 {
+      font-size: 29pt;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-top: 24pt;
+      padding-top: 6pt;
+      border-top: 2px solid var(--accent);
+      font-size: 17pt;
+    }
+
+    h3 {
+      margin-top: 15pt;
+      font-size: 12.5pt;
+      color: var(--accent-dark);
+    }
+
+    p {
+      margin: 6pt 0 0;
+    }
+
+    ul,
+    ol {
+      margin: 5pt 0 0 17pt;
+      padding: 0;
+    }
+
+    li {
+      margin: 3.3pt 0;
+    }
+
+    strong {
+      color: #111827;
+    }
+
+    .cover {
+      min-height: 8.7in;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      page-break-after: always;
+    }
+
+    .cover-hero {
+      padding: 26pt 28pt;
+      border-radius: 9pt;
+      color: white;
+      background: linear-gradient(135deg, #123b3a, #172033 55%, #111827);
+    }
+
+    .cover-hero p {
+      max-width: 6.2in;
+      color: #d7f5ef;
+      font-size: 12.3pt;
+    }
+
+    .cover-hero h1 {
+      color: white;
+    }
+
+    .cover-meta {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10pt;
+      margin-top: 18pt;
+    }
+
+    .meta-card {
+      padding: 10pt;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 7pt;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .meta-card b {
+      display: block;
+      margin-bottom: 3pt;
+      color: white;
+      font-size: 9pt;
+      text-transform: uppercase;
+    }
+
+    .meta-card span {
+      color: #e5f7f4;
+      font-size: 10pt;
+    }
+
+    .cover-shot {
+      margin-top: 18pt;
+      border: 1px solid #1f2937;
+      border-radius: 9pt;
+      overflow: hidden;
+      box-shadow: 0 9pt 26pt rgba(17, 24, 39, 0.18);
+    }
+
+    .cover-shot img {
+      display: block;
+      width: 100%;
+    }
+
+    .cover-footer {
+      color: var(--muted);
+      font-size: 9.5pt;
+    }
+
+    .toc {
+      page-break-after: always;
+    }
+
+    .toc-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8pt 16pt;
+      margin-top: 14pt;
+    }
+
+    .toc-item {
+      padding: 8pt 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .toc-item b {
+      display: block;
+      font-size: 10.7pt;
+    }
+
+    .toc-item span {
+      color: var(--muted);
+      font-size: 9.4pt;
+    }
+
+    .note,
+    .callout,
+    .warning {
+      margin: 10pt 0 0;
+      padding: 9pt 10pt;
+      border-radius: 7pt;
+      page-break-inside: avoid;
+    }
+
+    .note {
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+    }
+
+    .callout {
+      border: 1px solid #99f6e4;
+      background: #ecfdf5;
+    }
+
+    .warning {
+      border: 1px solid #f5c77c;
+      background: #fff8e7;
+    }
+
+    .figure {
+      margin: 11pt 0 13pt;
+      page-break-inside: avoid;
+    }
+
+    .figure img {
+      display: block;
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 6pt;
+    }
+
+    .figure figcaption {
+      margin-top: 4pt;
+      color: var(--muted);
+      font-size: 8.8pt;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12pt;
+      margin-top: 7pt;
+    }
+
+    .panel {
+      padding: 9pt 10pt;
+      border: 1px solid var(--line);
+      border-radius: 7pt;
+      background: var(--soft);
+      page-break-inside: avoid;
+    }
+
+    .panel h3 {
+      margin-top: 0;
+    }
+
+    .steps {
+      counter-reset: step;
+      margin-top: 7pt;
+    }
+
+    .step {
+      position: relative;
+      margin: 7pt 0 0;
+      padding: 8pt 9pt 8pt 34pt;
+      border: 1px solid var(--line);
+      border-radius: 7pt;
+      background: white;
+      page-break-inside: avoid;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 9pt;
+      top: 9pt;
+      width: 17pt;
+      height: 17pt;
+      border-radius: 50%;
+      color: white;
+      background: var(--accent);
+      font-size: 9pt;
+      font-weight: 700;
+      line-height: 17pt;
+      text-align: center;
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 2pt;
+    }
+
+    table {
+      width: 100%;
+      margin-top: 8pt;
+      border-collapse: collapse;
+      page-break-inside: avoid;
+      font-size: 9.2pt;
+    }
+
+    th,
+    td {
+      padding: 6pt 7pt;
+      border: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    th {
+      color: white;
+      background: var(--accent-dark);
+      text-align: left;
+    }
+
+    .checklist td:first-child {
+      width: 0.34in;
+      color: var(--accent-dark);
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 9.2pt;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div>
+      <div class="cover-hero">
+        <h1>Tableforge DM Tutorial</h1>
+        <p>A practical operating guide for Dungeon Masters who use Tableforge to prepare maps, manage tokens, control visibility, and run a live Dungeons & Dragons table display.</p>
+        <div class="cover-meta">
+          <div class="meta-card">
+            <b>Audience</b>
+            <span>Dungeon Masters hosting local or networked D&amp;D sessions</span>
+          </div>
+          <div class="meta-card">
+            <b>Version</b>
+            <span>Tableforge 1.3.0 interface</span>
+          </div>
+          <div class="meta-card">
+            <b>Output</b>
+            <span>PDF tutorial with real app screenshots</span>
+          </div>
+        </div>
+      </div>
+      <figure class="cover-shot">
+        <img src="tableforge-dm-tutorial-assets/02-dm-workspace.png" alt="Tableforge DM workspace showing a hex ocean board and the DM sidebar">
+      </figure>
+    </div>
+    <p class="cover-footer">Prepared for DMs who need a repeatable session workflow: create or open a campaign, prepare scenes, publish the active board, and keep player-visible information under control.</p>
+  </section>
+
+  <section class="toc">
+    <h2>How To Use This Guide</h2>
+    <p>This document is written as a working manual. Read the first two sections before your first session, then use the later sections as references while building maps, placing tokens, and running the table.</p>
+    <div class="toc-grid">
+      <div class="toc-item"><b>1. Tableforge Concepts</b><span>DM portal, player viewer, projects, boards, and layers.</span></div>
+      <div class="toc-item"><b>2. Start A Campaign</b><span>Create, open, export, import, rename, and delete projects.</span></div>
+      <div class="toc-item"><b>3. Understand The DM Workspace</b><span>Top bar, quick tools, canvas, sidebar, and active layers.</span></div>
+      <div class="toc-item"><b>4. Prepare Boards</b><span>Grid type, board size, background media, board drawer, and publishing.</span></div>
+      <div class="toc-item"><b>5. Assets And Audio</b><span>Maps, token art, videos, music, and the soundboard.</span></div>
+      <div class="toc-item"><b>6. Tokens And Library</b><span>Creatures, vehicles, hex tokens, vision, layers, and bestiary search.</span></div>
+      <div class="toc-item"><b>7. Drawing And Measurement</b><span>Annotations, area templates, ruler, visibility, and encounter notes.</span></div>
+      <div class="toc-item"><b>8. Lighting, Walls, And Doors</b><span>Darkness, reveal areas, light-blocking walls, doors, and token vision.</span></div>
+      <div class="toc-item"><b>9. Player Viewer</b><span>Fullscreen display, zoom, rotation, and live board transitions.</span></div>
+      <div class="toc-item"><b>10. Live Session Checklist</b><span>Pre-session, during-session, and end-session routines.</span></div>
+    </div>
+  </section>
+
+  <h2>1. Tableforge Concepts</h2>
+  <p>Tableforge has two synchronized views. The <strong>Dungeon Master portal</strong> is your private control room. It lets you manage boards, maps, tokens, hidden information, light, walls, doors, and audio. The <strong>Player viewer</strong> is the public table display. It shows the board you publish and hides DM-only content.</p>
+  <div class="two-col">
+    <div class="panel">
+      <h3>Project</h3>
+      <p>A project is a campaign container. It holds boards, uploaded assets, token library entries, audio, and project-specific settings. Projects are stored on the host machine.</p>
+    </div>
+    <div class="panel">
+      <h3>Board</h3>
+      <p>A board is one scene, map, encounter, ship-combat field, or travel display. A project can have multiple boards, but players see only the board currently published to them.</p>
+    </div>
+    <div class="panel">
+      <h3>Layer</h3>
+      <p>The active layer decides what you can edit. Map handles background media, Token handles player-visible objects, GM handles private objects, and Wall/Lighting handles walls and doors.</p>
+    </div>
+    <div class="panel">
+      <h3>Player Visibility</h3>
+      <p>Tokens and drawings can be visible or hidden and can live on either the player layer or DM layer. Lighting adds another visibility gate by limiting what the player viewer reveals.</p>
+    </div>
+  </div>
+  <div class="callout"><strong>Core habit:</strong> prepare content on the DM side first, then publish only when the board is ready for players. The player viewer is a display, not your editing workspace.</div>
+
+  <h2>2. Start A Campaign</h2>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/01-project-launcher.png" alt="Tableforge project launcher">
+    <figcaption>Figure 1. The project launcher is where DMs create, open, import, export, rename, and delete campaigns.</figcaption>
+  </figure>
+  <div class="steps">
+    <div class="step"><b>Create a new project.</b> Enter the campaign name in the text field and choose <strong>Create project</strong>. Use a name that is clear to future you, such as "Phandelver Friday Table" or "Stormwreck Isles Chapter 2".</div>
+    <div class="step"><b>Open an existing project.</b> Click a project name in the list. The DM portal opens with that campaign's boards, assets, and saved table state.</div>
+    <div class="step"><b>Export before major changes.</b> Use <strong>Export</strong> to download a zipped copy before deleting boards, replacing maps, or making major restructuring changes.</div>
+    <div class="step"><b>Import a campaign backup.</b> Use <strong>Import Campaign</strong> to restore or move a campaign. If a project with the same identity already exists, Tableforge asks before overwriting it.</div>
+  </div>
+  <div class="warning"><strong>Host-machine rule:</strong> projects and assets live on the machine running Tableforge. If you move to another computer, export/import the campaign or copy the application data folder used by the desktop app.</div>
+
+  <h2>3. Understand The DM Workspace</h2>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/02-dm-workspace.png" alt="DM workspace with canvas and sidebar">
+    <figcaption>Figure 2. The DM portal combines the map canvas, top bar, quick tools, layer switcher, and right sidebar.</figcaption>
+  </figure>
+  <h3>Top Bar</h3>
+  <p>The top bar shows the active board name, board dimensions, grid type, active layer controls, player publication status, and the <strong>Open player view</strong> link. Click the board title to open the board drawer.</p>
+  <h3>Quick Map Tools</h3>
+  <p>The vertical quick menu on the left side of the map gives fast access to common tools. The visible hotkeys are <strong>V</strong> for select, <strong>T</strong> for token placement, <strong>D</strong> for drawing, <strong>M</strong> for ruler, and <strong>L</strong> for lighting.</p>
+  <h3>Right Sidebar</h3>
+  <p>The right sidebar has four major tabs: <strong>Board Items</strong>, <strong>Assets</strong>, <strong>Audio</strong>, and <strong>Board Setup</strong>. Resize it if you need more room while editing detailed token or board settings.</p>
+  <table>
+    <thead><tr><th>Workspace Area</th><th>Use It For</th><th>Best Practice</th></tr></thead>
+    <tbody>
+      <tr><td>Map canvas</td><td>Move tokens, draw areas, place walls, reveal light, use the ruler, and position the background.</td><td>Keep the active layer aligned with the type of object you intend to edit.</td></tr>
+      <tr><td>Active Layer</td><td>Switch between Map, Token, GM, and Wall/Lighting edit modes.</td><td>Use GM for private prep and Token for content players should be able to see.</td></tr>
+      <tr><td>Board Items</td><td>Create tokens, edit selected tokens, manage drawings, and open the token library.</td><td>Name tokens clearly so the sidebar remains useful during combat.</td></tr>
+      <tr><td>Board Setup</td><td>Change board size, grid mode, background media, lighting defaults, and shortcuts.</td><td>Finalize board dimensions before placing many objects.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. Prepare Boards</h2>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/03-board-drawer.png" alt="Tableforge board drawer">
+    <figcaption>Figure 3. The board drawer manages scene pages and controls which board is live for players.</figcaption>
+  </figure>
+  <h3>Create And Organize Boards</h3>
+  <p>Click the board title in the top-left area to open the board drawer. Each board card represents a scene. The drawer lets you switch boards, duplicate a prepared board, delete a board, create a new 5 ft square board, create a 50 ft hex board, import from the Dungeon Builder, or import from 5e.tools.</p>
+  <div class="steps">
+    <div class="step"><b>Add a standard battle map.</b> Choose <strong>5 ft Square Board</strong> for most tactical encounters, dungeon rooms, wilderness fights, and town maps.</div>
+    <div class="step"><b>Add a large-scale scene.</b> Choose <strong>50 ft Hex Board</strong> for naval combat, air combat, overland travel, or maps where each cell represents a larger area.</div>
+    <div class="step"><b>Duplicate repeatable scenes.</b> Duplicate a board when you want a variant of the same map with different token placement, weather, or encounter state.</div>
+    <div class="step"><b>Publish deliberately.</b> Use the player ribbon or publication action only when the board is ready for players. The status label tells you whether players are live on the active board or another board.</div>
+  </div>
+
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/04-board-setup.png" alt="Board setup tab">
+    <figcaption>Figure 4. Board Setup controls grid mode, board dimensions, cell size, background media, and lighting.</figcaption>
+  </figure>
+  <h3>Board Setup Fields</h3>
+  <ul>
+    <li><strong>Name:</strong> use a scene name the players will not mind seeing if the board title is visible.</li>
+    <li><strong>Grid:</strong> standard 5 ft square grid for tactical play, or 50 ft hex grid for vehicle and travel scenes.</li>
+    <li><strong>Cells wide / Cells high:</strong> set the board footprint. Larger boards give more room but can be slower to navigate.</li>
+    <li><strong>Cell pixels:</strong> controls rendered grid scale. Increase it for visual clarity; decrease it to fit larger maps.</li>
+    <li><strong>Background media:</strong> upload an image or video and assign it to the active board.</li>
+    <li><strong>Fit background to board:</strong> keep this on when the background should stretch to the exact board dimensions.</li>
+    <li><strong>Scale, opacity, X offset, Y offset:</strong> use these when fit-to-board is off and you need manual alignment.</li>
+  </ul>
+
+  <h2>5. Assets And Audio</h2>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/05-assets-manager.png" alt="Asset manager tab">
+    <figcaption>Figure 5. The Asset Manager stores project-specific maps, token images, videos, and audio.</figcaption>
+  </figure>
+  <p>The Asset Manager is the safest place to bring files into a campaign. Uploaded files are stored with the project and become available to board backgrounds, token images, vehicles, and audio controls.</p>
+  <div class="two-col">
+    <div class="panel">
+      <h3>Asset Categories</h3>
+      <p>Choose a category before uploading: Token, Map, Background music, Image, Video, or Audio. The category helps you find the asset later and controls common actions like using an image as a token or a map.</p>
+    </div>
+    <div class="panel">
+      <h3>Drag-And-Drop Uploads</h3>
+      <p>Drop files into the upload zone or browse from disk. Supported media includes PNG, JPEG, WebP, MP4, WebM, MOV, MP3, and WAV.</p>
+    </div>
+  </div>
+  <h3>Use Assets In Play</h3>
+  <ul>
+    <li>Use <strong>Map</strong> on an image or video asset to apply it as the active board background.</li>
+    <li>Use <strong>Token</strong> on an image asset to set it as the image for newly placed tokens.</li>
+    <li>Use <strong>Choose from Project Assets</strong> in Board Setup to apply an already uploaded background.</li>
+    <li>Use <strong>Pick image from project assets</strong> on a token to reuse uploaded token art.</li>
+  </ul>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/06-soundboard.png" alt="Soundboard tab">
+    <figcaption>Figure 6. The Audio tab lists uploaded audio assets and provides playback controls for the session.</figcaption>
+  </figure>
+  <p>For music and ambience, upload MP3 or WAV files as audio assets, then switch to the <strong>Audio</strong> tab. Each audio asset appears with browser playback controls. Keep volume low enough that table conversation remains clear.</p>
+
+  <h2>6. Tokens And Token Library</h2>
+  <p>Tokens represent creatures, players, vehicles, ships, hazards, or any other object that should appear on the board. Token tools live primarily in the <strong>Board Items</strong> tab.</p>
+  <h3>Place A Token</h3>
+  <div class="steps">
+    <div class="step"><b>Choose the Token tool.</b> Press <strong>T</strong> or click the plus icon in the quick menu.</div>
+    <div class="step"><b>Set the draft token fields.</b> Choose token type, label, color, size, and image. On 50 ft hex boards, Tableforge uses 50 ft hex tokens.</div>
+    <div class="step"><b>Click the board.</b> The token is placed on the active layer. If you are on the GM layer, the token starts as DM-only.</div>
+    <div class="step"><b>Select and refine.</b> Click a token to edit label, color, size, image, visibility, layer, vision, and emitted light.</div>
+  </div>
+  <h3>Token Types</h3>
+  <table>
+    <thead><tr><th>Token Type</th><th>Use Case</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Standard token</td><td>Characters, monsters, NPCs, furniture, hazards, and markers on 5 ft square grids.</td><td>Size can represent larger creatures. Use images for portraits or top-down art.</td></tr>
+      <tr><td>Vehicle token</td><td>Ships, wagons, large monsters, moving platforms, or unusually shaped objects.</td><td>Vehicle tokens have grid width, grid height, rotation, image scale, and image-position adjustment.</td></tr>
+      <tr><td>50 ft hex token</td><td>Ships and large-scale units on 50 ft hex boards.</td><td>These occupy one hex cell and are only compatible with 50 ft hex boards.</td></tr>
+    </tbody>
+  </table>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/07-token-library.png" alt="Token library modal">
+    <figcaption>Figure 7. The Token Library can save board tokens and search a 5e.tools bestiary source for reusable monsters.</figcaption>
+  </figure>
+  <h3>Build A Reusable Token Library</h3>
+  <p>The Token Library is project-wide. Save a selected board token when you want to reuse it across boards. You can also search a 5e.tools bestiary source, save a monster entry, and then import that token onto compatible boards. Library tokens retain useful defaults such as name, size, layer, vision, color, and token art when available.</p>
+  <div class="note"><strong>DM-only prep:</strong> store ambush monsters, invisible NPCs, traps, or unrevealed terrain on the DM layer until the moment they should become visible. Move them to the player layer or toggle visibility when the scene changes.</div>
+
+  <h2>7. Drawing And Measurement</h2>
+  <p>Drawing tools are useful for spell areas, routes, labels, threat zones, room highlights, and quick table communication. Tableforge supports freehand drawing, rectangles, squares, circles, cones, and a ruler.</p>
+  <table>
+    <thead><tr><th>Tool</th><th>Typical Use</th><th>Session Tip</th></tr></thead>
+    <tbody>
+      <tr><td>Freehand</td><td>Mark paths, sketch hazards, circle objects, or annotate a map.</td><td>Use a bright color, then hide or delete when it stops being relevant.</td></tr>
+      <tr><td>Rectangle / Square</td><td>Mark rooms, zones, spell effects, and cover areas.</td><td>Use the player layer for visible effects and the DM layer for private planning.</td></tr>
+      <tr><td>Circle</td><td>Show auras, explosions, spell radii, and sound zones.</td><td>Keep the color consistent for recurring spell types.</td></tr>
+      <tr><td>Cone</td><td>Show breath weapons, cones of cold, sight cones, and trap arcs.</td><td>Confirm facing before publishing the effect to players.</td></tr>
+      <tr><td>Ruler</td><td>Measure movement, ranges, distances, and vehicle spacing.</td><td>Use it while adjudicating, then release it so the board remains uncluttered.</td></tr>
+    </tbody>
+  </table>
+  <p>The <strong>Drawings</strong> list in the sidebar lets you select drawings, change layers, toggle visibility, and delete old marks. During a long combat, clear stale drawings regularly so players do not mistake old measurements for active effects.</p>
+
+  <h2>8. Lighting, Walls, And Doors</h2>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/08-lighting-tools.png" alt="Lighting quick tools">
+    <figcaption>Figure 8. Lighting tools provide wall, door, reveal, hide, and lighting-enable controls.</figcaption>
+  </figure>
+  <p>Lighting is the main way to run exploration and line-of-sight scenes. When lighting is enabled, the player viewer darkens the board and reveals only areas exposed by token vision, token light, or manual reveal regions.</p>
+  <h3>Lighting Setup Workflow</h3>
+  <div class="steps">
+    <div class="step"><b>Enable board lighting.</b> Turn on <strong>Enable board lighting</strong> in Board Setup or the lighting quick options. Set darkness to the desired level.</div>
+    <div class="step"><b>Draw light-blocking walls.</b> Switch to Wall/Lighting and use the Wall tool to trace room boundaries, cliffs, dense foliage, or other blockers.</div>
+    <div class="step"><b>Place doors.</b> Use the Door tool on boundaries where players can open, close, or encounter locked passages.</div>
+    <div class="step"><b>Configure token vision.</b> Select player tokens and set bright vision, dim vision, emitted bright light, and emitted dim light.</div>
+    <div class="step"><b>Reveal manually when needed.</b> Use Reveal / Hide for areas players should see even if token vision does not cover them, such as a narrated overview or known location.</div>
+  </div>
+  <h3>Door States</h3>
+  <p>Doors can be closed, open, or locked. Closed and locked doors block light. Open doors stop blocking light. Locked doors do not toggle open from normal player interaction until you unlock or change their state.</p>
+  <div class="warning"><strong>Prep warning:</strong> lighting is only as good as the walls you draw. Before a session, open the player view and confirm that important rooms, doors, and corridors reveal as expected.</div>
+
+  <h2>9. Player Viewer</h2>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/09-player-view.png" alt="Player viewer showing the published board">
+    <figcaption>Figure 9. The player viewer shows the published board and hides DM-only content.</figcaption>
+  </figure>
+  <p>Open the player viewer from the DM top bar or by visiting the same host URL with <strong>?view=player</strong>. Use it on the table display, projector, TV, second browser window, or another device on the same network.</p>
+  <h3>Player Controls</h3>
+  <ul>
+    <li><strong>Zoom:</strong> opens a zoom slider. Keyboard shortcuts <strong>+</strong>, <strong>-</strong>, and <strong>0</strong> adjust zoom from the player viewer.</li>
+    <li><strong>Rotate:</strong> rotates the board in 90-degree increments for table-mounted displays or unusual screen placement.</li>
+    <li><strong>Full screen:</strong> expands the player viewer. In fullscreen, the top bar hides until the pointer moves near the top of the screen.</li>
+    <li><strong>Pan:</strong> drag the board when zoomed or when a large board does not fit the display.</li>
+  </ul>
+  <figure class="figure">
+    <img src="tableforge-dm-tutorial-assets/10-player-zoom.png" alt="Player zoom controls">
+    <figcaption>Figure 10. The player zoom popover supports close-up tactical play and large tabletop displays.</figcaption>
+  </figure>
+  <h3>Publish Boards To Players</h3>
+  <p>The DM controls which board the player viewer displays. Use the board drawer to publish a board, or drag the player ribbon onto a board card. The top bar status tells you whether players are live on the active board. Use this status before revealing a surprise map.</p>
+
+  <h2>10. Live Session Checklist</h2>
+  <h3>Before The Session</h3>
+  <table class="checklist">
+    <tbody>
+      <tr><td>□</td><td>Open the correct project and verify the expected boards exist.</td></tr>
+      <tr><td>□</td><td>Export the project if you are about to run a major session or make risky edits.</td></tr>
+      <tr><td>□</td><td>Check each board background, grid alignment, board size, and cell scale.</td></tr>
+      <tr><td>□</td><td>Place player tokens, common NPCs, monsters, vehicles, and hidden DM-layer objects.</td></tr>
+      <tr><td>□</td><td>Set token vision and emitted light for scenes that use lighting.</td></tr>
+      <tr><td>□</td><td>Open the player view and verify the published board, zoom, rotation, and fullscreen behavior.</td></tr>
+      <tr><td>□</td><td>Test any audio tracks you plan to use.</td></tr>
+    </tbody>
+  </table>
+  <h3>During The Session</h3>
+  <ul>
+    <li>Keep the player viewer open on the table display and the DM portal open on your private screen.</li>
+    <li>Use the board drawer to move players between scenes only when you are ready for them to see the new board.</li>
+    <li>Use GM-layer tokens for hidden enemies, traps, and notes. Move or reveal them when the fiction calls for it.</li>
+    <li>Use the ruler for quick rulings, then clear stale marks.</li>
+    <li>For exploration, reveal intentionally. Avoid drawing a giant reveal area unless the players should truly see that whole space.</li>
+  </ul>
+  <h3>After The Session</h3>
+  <ul>
+    <li>Clean up temporary drawings, old measurements, and one-off tokens.</li>
+    <li>Rename boards that changed purpose during play.</li>
+    <li>Export the campaign if the session created important state you want backed up.</li>
+    <li>Prepare the next published board before closing if the next session starts in the same scene.</li>
+  </ul>
+
+  <h2>Troubleshooting</h2>
+  <table>
+    <thead><tr><th>Problem</th><th>Likely Cause</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td>Player view says no project is open.</td><td>The DM has not opened a project on the host.</td><td>Open a project in the DM portal, then reload the player viewer.</td></tr>
+      <tr><td>Players see the wrong board.</td><td>A different board is published.</td><td>Open the board drawer and publish the intended board. Confirm the top bar says players are live here.</td></tr>
+      <tr><td>A token is invisible to players.</td><td>It is hidden, on the DM layer, blocked by lighting, or not on the published board.</td><td>Check token visibility, token layer, board publication, and lighting reveal state.</td></tr>
+      <tr><td>Background is misaligned.</td><td>Board dimensions changed after the background was set, or fit-to-board is off.</td><td>Turn on fit-to-board, or use scale and offsets while the Map layer is active.</td></tr>
+      <tr><td>Lighting reveals too much or too little.</td><td>Missing walls, incorrect door state, token vision distances, or manual reveal regions.</td><td>Inspect Wall/Lighting, selected token vision, and reveal areas in Board Setup.</td></tr>
+      <tr><td>Audio is missing.</td><td>The file was not uploaded as an audio asset or the browser blocked playback until interaction.</td><td>Upload MP3/WAV in Assets, then start playback manually from the Audio tab.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Keyboard And Workflow Reference</h2>
+  <table>
+    <thead><tr><th>Action</th><th>Shortcut Or Control</th></tr></thead>
+    <tbody>
+      <tr><td>Select and move</td><td>V or the cursor quick tool</td></tr>
+      <tr><td>Place token</td><td>T or the plus quick tool</td></tr>
+      <tr><td>Draw</td><td>D or the drawing quick tool</td></tr>
+      <tr><td>Measure</td><td>M or the ruler quick tool</td></tr>
+      <tr><td>Lighting tools</td><td>L or the lightbulb quick tool</td></tr>
+      <tr><td>Copy selected token or drawing</td><td>Cmd+C or Ctrl+C</td></tr>
+      <tr><td>Paste copied token or drawing</td><td>Cmd+V or Ctrl+V</td></tr>
+      <tr><td>Delete selected object</td><td>Delete or Backspace</td></tr>
+      <tr><td>Undo / redo</td><td>Cmd+Z / Cmd+Shift+Z, or Ctrl+Z / Ctrl+Y</td></tr>
+      <tr><td>Player zoom</td><td>Zoom button, +, -, or 0 in the player viewer</td></tr>
+    </tbody>
+  </table>
+  <p class="small">End of tutorial.</p>
+</body>
+</html>
