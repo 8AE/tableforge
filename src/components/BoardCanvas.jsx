@@ -5,6 +5,7 @@ import {
   coneTemplate,
   feetBetween,
   hexPolygonPoints,
+  hexCellMetrics,
   isPointInDrawing,
   isPointNearWall,
   isHexBoard,
@@ -216,8 +217,10 @@ export function BoardCanvas({
 
   const pointFromEvent = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
+    const hexMetrics = hexBoard ? hexCellMetrics(board) : null;
+    const unitWidth = hexMetrics?.width || tile;
     return {
-      x: (event.clientX - rect.left) / (tile * scale),
+      x: (event.clientX - rect.left) / (unitWidth * scale),
       y: (event.clientY - rect.top) / (tile * scale),
       px: (event.clientX - rect.left) / scale,
       py: (event.clientY - rect.top) / scale,
@@ -876,11 +879,10 @@ function nearestDoorEdge(localX, localY, cell) {
 }
 
 function renderBoardGrid(board) {
-  const tile = Number(board.tileSize) || 42;
   if (isHexBoard(board)) {
     const cells = [];
-    for (let y = 0; y < board.rows; y += 1) {
-      for (let x = 0; x < board.columns; x += 1) {
+    for (let y = -1; y <= board.rows; y += 1) {
+      for (let x = -1; x <= board.columns; x += 1) {
         cells.push(<polygon key={`hex-${x}-${y}`} className="hex-grid-cell" points={hexPolygonPoints({ x, y }, board)} />);
       }
     }
