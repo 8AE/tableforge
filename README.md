@@ -17,10 +17,10 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Resize the board background image by dragging it in background edit mode.
 - Create, rename, delete, and open projects that contain saved boards. Project names must be unique.
 - Create multiple saved boards and publish the active board to the player viewer.
-- Place and move tokens on the active board grid, including standard 5 ft tokens and dedicated 50 ft hex tokens.
+- Place and move tokens on the active board grid, including standard 5 ft tokens and dedicated 50 ft hex tokens. Clicking with the token tool asks whether to create a new token or place one from the library on that cell.
 - Edit selected tokens, including color and uploaded token artwork.
-- Open a project-wide token library overlay, edit saved library tokens, and import them onto any board in the project.
-- Search a 5e.tools bestiary, including custom locally hosted 5e.tools base URLs, and save monsters into the project token library.
+- Open a project-wide searchable token library with quick stats (CR, AC, HP, size, vision, source) for each saved token, edit tokens in a dedicated popup, and import them onto any board in the project.
+- Search monsters from the 5e.tools bestiary (including custom locally hosted base URLs) or the public Open 5e API, review their stats, and save them into the project token library.
 - Configure token vision distance and quickly toggle token vision on or off for board lighting.
 - Duplicate or delete tokens and drawings from the right-click menu in the DM view.
 - Enable board lighting, manually reveal lit areas, draw light-blocking walls, and preview player visibility in the DM view.

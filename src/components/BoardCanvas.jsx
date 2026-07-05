@@ -34,7 +34,8 @@ export function BoardCanvas({
   activeLayer = 'token',
   drawLayer = 'player',
   drawColor = '#36d399',
-  onAddToken,
+  onRequestNewToken,
+  onRequestLibraryToken,
   onMoveToken,
   onMoveSelection,
   vehicleImageAdjustTokenId,
@@ -59,6 +60,7 @@ export function BoardCanvas({
 }) {
   const [drag, setDrag] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
+  const [tokenPrompt, setTokenPrompt] = useState(null);
   const [lockedDoorAlert, setLockedDoorAlert] = useState(null);
   const shellRef = useRef(null);
   const backgroundVideoRef = useRef(null);
@@ -203,7 +205,7 @@ export function BoardCanvas({
   }, [dmZoom]);
 
   useEffect(() => {
-    if (!drag && !contextMenu) return undefined;
+    if (!drag && !contextMenu && !tokenPrompt) return undefined;
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -211,10 +213,11 @@ export function BoardCanvas({
       if (drag?.type === 'ruler') onLiveMeasurement?.(null);
       setDrag(null);
       setContextMenu(null);
+      setTokenPrompt(null);
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [drag, contextMenu, onLiveMeasurement]);
+  }, [drag, contextMenu, tokenPrompt, onLiveMeasurement]);
 
   useEffect(() => {
     if (background.type !== 'video' || !background.src) return undefined;
@@ -334,7 +337,7 @@ export function BoardCanvas({
     }
 
     if (tool === 'token' && ['token', 'gm'].includes(activeLayer)) {
-      onAddToken(snapped);
+      setTokenPrompt({ x: point.px, y: point.py, cell: snapped });
       return;
     }
 
@@ -545,6 +548,7 @@ export function BoardCanvas({
 
   const onBoardPointerDown = (event) => {
     setContextMenu(null);
+    setTokenPrompt(null);
     if (view === 'player') {
       const point = pointFromEvent(event);
       const door = doorAt(point);
@@ -897,6 +901,13 @@ export function BoardCanvas({
             </button>
             );
           })}
+          {tokenPrompt && (
+            <div className="context-menu token-prompt" style={{ left: tokenPrompt.x, top: tokenPrompt.y }} onPointerDown={(event) => event.stopPropagation()}>
+              <span className="token-prompt-title">Add a token here</span>
+              <button onClick={() => { onRequestNewToken?.(tokenPrompt.cell); setTokenPrompt(null); }}>New token…</button>
+              <button onClick={() => { onRequestLibraryToken?.(tokenPrompt.cell); setTokenPrompt(null); }}>From library…</button>
+            </div>
+          )}
           {contextMenu && (
             <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
               <button onClick={() => { onDuplicateSelection(contextMenu.target); setContextMenu(null); }}>Duplicate</button>

@@ -17,7 +17,6 @@ import {
   Lightbulb,
   MousePointer2,
   Music,
-  Pencil,
   Plus,
   Redo2,
   Ruler,
@@ -35,6 +34,7 @@ import {
 import { BoardCanvas } from './BoardCanvas';
 import { Panel } from './Panel';
 import { Topbar } from './Topbar';
+import { normalizeFiveEToolsBaseUrl, TokenCreateModal, TokenLibraryModal } from './TokenLibrary';
 import { areTokenAndBoardCompatible, boardGridLabel, boxesOverlap, defaultLighting, getBoard, getBoardEntity, GRID_HEX_50FT, incompatibleTokenGridMessage, isHexBoard, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, tokenFootprint, uid, updateActiveBoard } from '../lib/board';
 import { dungeonToBoard, normalizeDungeon } from '../lib/dungeon';
 
@@ -57,12 +57,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     const saved = Number(window.localStorage.getItem('tableforge-dm-sidebar-width'));
     return Number.isFinite(saved) && saved >= 300 ? saved : 380;
   });
-  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
-  const [editingLibraryTokenId, setEditingLibraryTokenId] = useState(null);
-  const [bestiaryQuery, setBestiaryQuery] = useState('');
-  const [bestiaryResults, setBestiaryResults] = useState([]);
-  const [bestiaryError, setBestiaryError] = useState('');
-  const [isSearchingBestiary, setIsSearchingBestiary] = useState(false);
+  const [libraryMode, setLibraryMode] = useState(null);
+  const [pendingTokenCell, setPendingTokenCell] = useState(null);
+  const [isCreateTokenOpen, setIsCreateTokenOpen] = useState(false);
   const [vehicleImageAdjustTokenId, setVehicleImageAdjustTokenId] = useState(null);
   const [mapQuery, setMapQuery] = useState('');
   const [mapResults, setMapResults] = useState([]);
@@ -329,44 +326,57 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     }
   };
 
-  const addToken = (point) => {
-    const isVehicle = tokenDraft.tokenKind === 'vehicle';
-    const isHexToken = tokenDraft.tokenKind === 'hex50';
-    if (isHexBoard(board) && !isHexToken) {
-      setTokenGridError('Only 50 ft hex tokens can be placed on a 50 ft hex grid.');
-      return;
-    }
-    if (!isHexBoard(board) && isHexToken) {
-      setTokenGridError('50 ft hex tokens can only be placed on a 50 ft hex grid.');
+  const requestNewToken = (cell) => {
+    setPendingTokenCell(cell);
+    setIsCreateTokenOpen(true);
+  };
+
+  const requestLibraryToken = (cell) => {
+    setPendingTokenCell(cell);
+    setLibraryMode('pick');
+  };
+
+  const createTokenAt = (cell, draft) => {
+    const isVehicle = draft.tokenKind === 'vehicle';
+    const isHexToken = draft.tokenKind === 'hex50';
+    if (isHexBoard(board) !== isHexToken) {
+      setTokenGridError(incompatibleTokenGridMessage(draft, board));
       return;
     }
     const draftVehicle = {
-      width: Number(tokenDraft.vehicle?.width) || 4,
-      height: Number(tokenDraft.vehicle?.height) || 3,
-      backgroundImage: tokenDraft.vehicle?.backgroundImage || tokenDraft.image || '',
-      rotation: Number(tokenDraft.vehicle?.rotation) || 0,
+      width: Number(draft.vehicle?.width) || 4,
+      height: Number(draft.vehicle?.height) || 3,
+      backgroundImage: draft.vehicle?.backgroundImage || draft.image || '',
+      rotation: Number(draft.vehicle?.rotation) || 0,
     };
     const token = {
       id: uid('token'),
-      x: point.x,
-      y: point.y,
+      x: cell.x,
+      y: cell.y,
       tokenKind: isHexToken ? 'hex50' : isVehicle ? 'vehicle' : 'creature',
-      label: tokenDraft.label || (isHexToken ? 'Ship' : isVehicle ? 'Vehicle' : 'Token'),
-      color: tokenDraft.color,
+      label: draft.label || (isHexToken ? 'Ship' : isVehicle ? 'Vehicle' : 'Token'),
+      color: draft.color,
       layer: activeLayer === 'gm' ? 'dm' : 'player',
-      size: isHexToken ? 1 : isVehicle ? Math.max(draftVehicle.width, draftVehicle.height) : Number(tokenDraft.size) || 1,
+      size: isHexToken ? 1 : isVehicle ? Math.max(draftVehicle.width, draftVehicle.height) : Number(draft.size) || 1,
       visible: true,
       visionEnabled: true,
       visionBrightFeet: 0,
       visionDimFeet: 0,
       lightBrightFeet: 0,
       lightDimFeet: 0,
-      image: tokenDraft.image || '',
+      image: draft.image || '',
       vehicle: draftVehicle,
     };
     setTokenGridError('');
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     selectTarget({ type: 'token', id: token.id }, activeLayer === 'gm' ? 'gm' : 'token');
+  };
+
+  const handleCreateToken = (draft) => {
+    setTokenDraft(draft);
+    createTokenAt(pendingTokenCell || { x: 0, y: 0 }, draft);
+    setIsCreateTokenOpen(false);
+    setPendingTokenCell(null);
   };
 
   const saveSelectedTokenToLibrary = () => {
@@ -378,7 +388,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     updateTokenLibrary((items) => [...items, libraryToken]);
   };
 
-  const importLibraryToken = (libraryToken) => {
+  const importLibraryToken = (libraryToken, cell = null) => {
     if (!areTokenAndBoardCompatible(libraryToken, board)) {
       setTokenGridError(incompatibleTokenGridMessage(libraryToken, board));
       return;
@@ -386,13 +396,17 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     const token = {
       ...normalizeLibraryToken(libraryToken),
       id: uid('token'),
-      x: 0,
-      y: 0,
+      x: cell?.x ?? 0,
+      y: cell?.y ?? 0,
       visible: true,
     };
     setTokenGridError('');
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
+    if (libraryMode === 'pick') {
+      setLibraryMode(null);
+      setPendingTokenCell(null);
+    }
   };
 
   const updateLibraryToken = (id, patch) => {
@@ -401,49 +415,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const deleteLibraryToken = (id) => {
     updateTokenLibrary((items) => items.filter((token) => token.id !== id));
-    if (editingLibraryTokenId === id) setEditingLibraryTokenId(null);
-  };
-
-  const saveBestiaryMonsterToLibrary = (monster) => {
-    updateTokenLibrary((items) => [...items, normalizeLibraryToken({
-      id: uid('library-token'),
-      label: monster.name,
-      color: monsterColor(monster),
-      image: monsterTokenImage(state.fiveEToolsBaseUrl, monster),
-      layer: 'dm',
-      size: monsterTokenSize(monster),
-      visionFeet: monsterVisionFeet(monster),
-      visionMode: monsterVisionFeet(monster) ? 'darkvision' : 'normal',
-      visionEnabled: Boolean(monsterVisionFeet(monster)),
-    })]);
-  };
-
-  const searchBestiary = async () => {
-    const query = bestiaryQuery.trim().toLowerCase();
-    if (!query) return;
-    setBestiaryError('');
-    setBestiaryResults([]);
-    setIsSearchingBestiary(true);
-    try {
-      const baseUrl = normalizeFiveEToolsBaseUrl(state.fiveEToolsBaseUrl);
-      const index = await fetchBestiaryJson(`${baseUrl}data/bestiary/index.json`);
-      const files = Object.values(index).filter((file) => typeof file === 'string');
-      const matches = [];
-      for (const file of files) {
-        const data = await fetchBestiaryJson(`${baseUrl}data/bestiary/${file}`);
-        for (const monster of data.monster || []) {
-          if (monster.name?.toLowerCase().includes(query)) matches.push(monster);
-          if (matches.length >= 40) break;
-        }
-        if (matches.length >= 40) break;
-      }
-      setBestiaryResults(matches);
-      if (!matches.length) setBestiaryError('No matching monsters found.');
-    } catch (error) {
-      setBestiaryError(error.message || 'Unable to search the 5e.tools bestiary.');
-    } finally {
-      setIsSearchingBestiary(false);
-    }
   };
 
   const searchMaps = async () => {
@@ -885,7 +856,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       const mod = event.metaKey || event.ctrlKey;
       const tag = event.target?.tagName?.toLowerCase();
       if (event.key === 'Escape') {
-        if (isLibraryOpen) setIsLibraryOpen(false);
+        if (isCreateTokenOpen) { setIsCreateTokenOpen(false); setPendingTokenCell(null); }
+        else if (libraryMode) { setLibraryMode(null); setPendingTokenCell(null); }
         else if (isDungeonImportOpen) setIsDungeonImportOpen(false);
         else if (isFiveEToolsMapImportOpen) setIsFiveEToolsMapImportOpen(false);
         else if (boardDeleteTarget) setBoardDeleteTarget(null);
@@ -942,7 +914,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo, tool, isLibraryOpen, isDungeonImportOpen, isFiveEToolsMapImportOpen, boardDeleteTarget]);
+  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo, tool, isCreateTokenOpen, libraryMode, isDungeonImportOpen, isFiveEToolsMapImportOpen, boardDeleteTarget]);
 
   return (
     <>
@@ -1043,7 +1015,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             activeLayer={activeLayer}
             drawLayer={drawLayer}
             drawColor={drawColor}
-            onAddToken={addToken}
+            onRequestNewToken={requestNewToken}
+            onRequestLibraryToken={requestLibraryToken}
             onMoveToken={moveToken}
             onMoveSelection={moveSelection}
             vehicleImageAdjustTokenId={vehicleImageAdjustTokenId}
@@ -1316,66 +1289,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           {activeSidebarTab === 'journal' && (
             <div className="sidebar-tab-panel">
 
-        <Panel title="Token" icon={<Plus size={16} />}>
-          <label>
-            Type
-            <select value={tokenDraft.tokenKind || 'creature'} onChange={(event) => setTokenDraft({ ...tokenDraft, tokenKind: event.target.value })}>
-              {!isHexBoard(board) && <option value="creature">Standard token</option>}
-              {!isHexBoard(board) && <option value="vehicle">Vehicle token</option>}
-              {isHexBoard(board) && <option value="hex50">50 ft hex token</option>}
-            </select>
-          </label>
+        <Panel title="Add Tokens" icon={<Plus size={16} />}>
+          <p className="empty-note">Use the Place Token tool (T) and click a cell — you'll be asked to create a new token or pick one from the library.</p>
           {tokenGridError && <p className="form-error">{tokenGridError}</p>}
-          <label>
-            Label
-            <input value={tokenDraft.label} onChange={(event) => setTokenDraft({ ...tokenDraft, label: event.target.value })} />
-          </label>
-          <div className="split">
-            <label>
-              Color
-              <input type="color" value={tokenDraft.color} onChange={(event) => setTokenDraft({ ...tokenDraft, color: event.target.value })} />
-            </label>
-            <label>
-              Size
-              <input type="number" min="1" max="6" value={tokenDraft.tokenKind === 'hex50' ? 1 : tokenDraft.size} onChange={(event) => setTokenDraft({ ...tokenDraft, size: event.target.value })} disabled={tokenDraft.tokenKind === 'vehicle' || tokenDraft.tokenKind === 'hex50'} />
-            </label>
-          </div>
-          {tokenDraft.tokenKind === 'vehicle' && (
-            <div className="vehicle-editor">
-              <div className="split">
-                <label>
-                  Grid width
-                  <input type="number" min="1" max="30" value={tokenDraft.vehicle?.width || 4} onChange={(event) => setTokenDraft({ ...tokenDraft, vehicle: { ...(tokenDraft.vehicle || {}), width: Number(event.target.value) } })} />
-                </label>
-                <label>
-                  Grid height
-                  <input type="number" min="1" max="30" value={tokenDraft.vehicle?.height || 3} onChange={(event) => setTokenDraft({ ...tokenDraft, vehicle: { ...(tokenDraft.vehicle || {}), height: Number(event.target.value) } })} />
-                </label>
-              </div>
-              <button className="command" title="Rotate new vehicle tokens 90 degrees" onClick={() => setTokenDraft({ ...tokenDraft, vehicle: { ...(tokenDraft.vehicle || {}), rotation: (((tokenDraft.vehicle?.rotation || 0) + 90) % 360) } })}>
-                <RotateCw size={16} /> Rotate {tokenDraft.vehicle?.rotation || 0} degrees
-              </button>
-            </div>
-          )}
-          {tokenDraft.image && (
-            <div className="selected-asset-row">
-              <img src={tokenDraft.image} alt="" />
-              <button className="command" onClick={() => setTokenDraft({ ...tokenDraft, image: '' })}>Clear token image</button>
-            </div>
-          )}
-          {imageAssets.length > 0 && (
-            <details className="asset-picker">
-              <summary>Pick token image from assets</summary>
-              <div className="asset-picker-grid">
-                {imageAssets.map((asset) => (
-                  <button key={asset.id} title={`Use ${asset.name} for new tokens`} onClick={() => setTokenDraft((draft) => ({ ...draft, image: asset.path, vehicle: { ...(draft.vehicle || {}), backgroundImage: asset.path } }))}>
-                    <img src={asset.path} alt="" />
-                    <span>{asset.name}</span>
-                  </button>
-                ))}
-              </div>
-            </details>
-          )}
         </Panel>
 
         {selectedToken && (
@@ -1488,7 +1404,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         )}
 
         <Panel title="Token Library" icon={<Library size={16} />}>
-          <button className="command accent" title="Open the project-wide token library" onClick={() => setIsLibraryOpen(true)}>
+          <button className="command accent" title="Open the project-wide token library" onClick={() => setLibraryMode('manage')}>
             <Library size={16} /> Open token library ({tokenLibrary.length})
           </button>
         </Panel>
@@ -1603,168 +1519,36 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         </div>
       </aside>
 
-      {isLibraryOpen && (
-        <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Token library">
-          <div className="library-modal">
-            <header className="library-modal-header">
-              <div>
-                <strong>Token Library</strong>
-                <span>{tokenLibrary.length} saved tokens in this project</span>
-              </div>
-              <button title="Close token library" onClick={() => setIsLibraryOpen(false)}><X size={18} /></button>
-            </header>
+      {libraryMode && (
+        <TokenLibraryModal
+          mode={libraryMode}
+          board={board}
+          tokenLibrary={tokenLibrary}
+          selectedToken={selectedToken}
+          onSaveSelectedToken={saveSelectedTokenToLibrary}
+          fiveEToolsBaseUrl={state.fiveEToolsBaseUrl}
+          onChangeFiveEToolsBaseUrl={updateFiveEToolsBaseUrl}
+          imageAssets={imageAssets}
+          isUploadingAsset={isUploadingAsset}
+          onUploadImage={(event, onAssetReady) => uploadAssetForUse(event, 'token', onAssetReady)}
+          onImportToken={(libraryToken) => importLibraryToken(libraryToken, libraryMode === 'pick' ? pendingTokenCell : null)}
+          onUpdateToken={updateLibraryToken}
+          onDeleteToken={deleteLibraryToken}
+          onAddLibraryToken={(libraryToken) => updateTokenLibrary((items) => [...items, libraryToken])}
+          onClose={() => { setLibraryMode(null); setPendingTokenCell(null); }}
+        />
+      )}
 
-            <div className="library-modal-tools">
-              <button className="command accent" title="Save the selected board token into this project's token library" onClick={saveSelectedTokenToLibrary} disabled={!selectedToken}>
-                <Copy size={16} /> Save selected token
-              </button>
-              <div className="bestiary-search">
-                <label>
-                  5e.tools base URL
-                  <input value={state.fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => updateFiveEToolsBaseUrl(event.target.value)} />
-                </label>
-                <label>
-                  Search bestiary
-                  <input value={bestiaryQuery} onChange={(event) => setBestiaryQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchBestiary(); }} placeholder="Goblin, dragon, bandit..." />
-                </label>
-                <button className="command" title="Search the 5e.tools bestiary data files" onClick={searchBestiary} disabled={isSearchingBestiary}>
-                  <Library size={16} /> {isSearchingBestiary ? 'Searching...' : 'Search bestiary'}
-                </button>
-                {bestiaryError && <p className="form-error">{bestiaryError}</p>}
-                {bestiaryResults.length > 0 && (
-                  <div className="bestiary-results">
-                    {bestiaryResults.map((monster) => (
-                      <div className="bestiary-result" key={`${monster.source}-${monster.name}`}>
-                        <div>
-                          <strong>{monster.name}</strong>
-                          <span>{monster.source} · CR {formatMonsterCr(monster)} · {formatMonsterSize(monster)}</span>
-                        </div>
-                        <button className="command" title="Save this bestiary monster into the project token library" onClick={() => saveBestiaryMonsterToLibrary(monster)}>
-                          <Plus size={15} /> Save
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="library-grid">
-              {tokenLibrary.map((libraryToken) => {
-                const isEditing = editingLibraryTokenId === libraryToken.id;
-                return (
-                  <div className="library-token-card" key={libraryToken.id}>
-                    <div className="library-grid-token">
-                      <span className={`library-token-preview large ${libraryToken.image ? 'has-image' : ''}`} style={{ backgroundColor: libraryToken.image ? 'transparent' : libraryToken.color }}>
-                        {libraryToken.image ? <img src={libraryToken.image} alt="" /> : libraryToken.label.slice(0, 2)}
-                      </span>
-                      <div>
-                        <strong>{libraryToken.label}</strong>
-                        <span>
-                          {libraryToken.layer} · {libraryToken.tokenKind === 'hex50'
-                            ? '50 ft hex token'
-                            : libraryToken.tokenKind === 'vehicle'
-                            ? `vehicle ${libraryToken.vehicle?.width || 1} x ${libraryToken.vehicle?.height || 1}`
-                            : `size ${libraryToken.size} · vision ${libraryToken.visionFeet || 0} ft`}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="library-card-actions">
-                      <button className="command" title="Import this library token onto the active board" onClick={() => importLibraryToken(libraryToken)}><Plus size={16} /> Import</button>
-                      <button className="command" title="Edit this library token" onClick={() => setEditingLibraryTokenId(isEditing ? null : libraryToken.id)}><Pencil size={16} /> Edit</button>
-                      <button className="command danger" title="Remove this token from the project library" onClick={() => deleteLibraryToken(libraryToken.id)}><Trash2 size={16} /> Delete</button>
-                    </div>
-                    {isEditing && (
-                      <div className="library-token-editor">
-                        <label>
-                          Name
-                          <input value={libraryToken.label} onChange={(event) => updateLibraryToken(libraryToken.id, { label: event.target.value })} />
-                        </label>
-                        <div className="split">
-                          <label>
-                            Color
-                            <input type="color" value={libraryToken.color} onChange={(event) => updateLibraryToken(libraryToken.id, { color: event.target.value })} />
-                          </label>
-                          <label>
-                            Size
-                            <input type="number" min="1" max="6" value={libraryToken.tokenKind === 'hex50' ? 1 : libraryToken.size} onChange={(event) => updateLibraryToken(libraryToken.id, { size: Number(event.target.value) })} disabled={libraryToken.tokenKind === 'hex50'} />
-                          </label>
-                        </div>
-                        {libraryToken.tokenKind === 'hex50' && <p className="empty-note">50 ft hex token · import onto 50 ft hex boards only</p>}
-                        {libraryToken.tokenKind === 'vehicle' && (
-                          <div className="vehicle-editor">
-                            <div className="split">
-                              <label>
-                                Grid width
-                                <input type="number" min="1" max="30" value={libraryToken.vehicle?.width || 1} onChange={(event) => updateLibraryToken(libraryToken.id, { vehicle: { ...(libraryToken.vehicle || {}), width: Number(event.target.value) } })} />
-                              </label>
-                              <label>
-                                Grid height
-                                <input type="number" min="1" max="30" value={libraryToken.vehicle?.height || 1} onChange={(event) => updateLibraryToken(libraryToken.id, { vehicle: { ...(libraryToken.vehicle || {}), height: Number(event.target.value) } })} />
-                              </label>
-                            </div>
-                            <button className="command" title="Rotate this library vehicle token 90 degrees" onClick={() => updateLibraryToken(libraryToken.id, { vehicle: { ...(libraryToken.vehicle || {}), rotation: (((libraryToken.vehicle?.rotation || 0) + 90) % 360) } })}>
-                              <RotateCw size={16} /> Rotate {libraryToken.vehicle?.rotation || 0} degrees
-                            </button>
-                          </div>
-                        )}
-                        <label className="file-button">
-                          <Image size={16} />
-                          {isUploadingAsset ? 'Uploading image...' : libraryToken.tokenKind === 'vehicle' ? 'Vehicle background' : libraryToken.tokenKind === 'hex50' ? '50 ft token image' : 'Token image'}
-                          <input type="file" accept="image/*" onChange={(event) => uploadAssetForUse(event, 'token', (asset) => updateLibraryToken(libraryToken.id, libraryToken.tokenKind === 'vehicle' ? { image: asset.path, vehicle: { ...(libraryToken.vehicle || {}), backgroundImage: asset.path } } : { image: asset.path }))} />
-                        </label>
-                        {imageAssets.length > 0 && (
-                          <details className="asset-picker">
-                            <summary>Pick image from project assets</summary>
-                            <div className="asset-picker-grid">
-                              {imageAssets.map((asset) => (
-                                <button key={asset.id} title={`Use ${asset.name} for this library token`} onClick={() => updateLibraryToken(libraryToken.id, libraryToken.tokenKind === 'vehicle' ? { image: asset.path, vehicle: { ...(libraryToken.vehicle || {}), backgroundImage: asset.path } } : { image: asset.path })}>
-                                  <img src={asset.path} alt="" />
-                                  <span>{asset.name}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </details>
-                        )}
-                        <div className="split">
-                          <label>
-                            Layer
-                            <select value={libraryToken.layer} onChange={(event) => updateLibraryToken(libraryToken.id, { layer: event.target.value })}>
-                              <option value="player">Player</option>
-                              <option value="dm">DM</option>
-                            </select>
-                          </label>
-                          <label>
-                            Vision feet
-                            <input type="number" min="0" step="5" value={libraryToken.visionFeet || 0} onChange={(event) => updateLibraryToken(libraryToken.id, { visionFeet: Number(event.target.value) })} />
-                          </label>
-                        </div>
-                        <label>
-                          Vision type
-                          <select value={libraryToken.visionMode || 'darkvision'} onChange={(event) => updateLibraryToken(libraryToken.id, { visionMode: event.target.value })}>
-                            <option value="darkvision">Darkvision</option>
-                            <option value="lowlight">Low light</option>
-                            <option value="normal">Normal</option>
-                          </select>
-                        </label>
-                        <label className="check-row">
-                          <input type="checkbox" checked={libraryToken.visionEnabled !== false} onChange={(event) => updateLibraryToken(libraryToken.id, { visionEnabled: event.target.checked })} />
-                          Vision enabled
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {!tokenLibrary.length && (
-                <div className="library-empty">
-                  <strong>No saved tokens yet</strong>
-                  <span>Save a selected board token or search the 5e.tools bestiary to start building this project library.</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+      {isCreateTokenOpen && (
+        <TokenCreateModal
+          board={board}
+          initialDraft={tokenDraft}
+          imageAssets={imageAssets}
+          isUploadingAsset={isUploadingAsset}
+          onUploadImage={(event, onAssetReady) => uploadAssetForUse(event, 'token', onAssetReady)}
+          onCancel={() => { setIsCreateTokenOpen(false); setPendingTokenCell(null); }}
+          onCreate={handleCreateToken}
+        />
       )}
 
       {isDungeonImportOpen && (
@@ -1886,11 +1670,6 @@ function ClampedNumberInput({ value, min, max, onCommit }) {
       onKeyDown={(event) => { if (event.key === 'Enter') event.target.blur(); }}
     />
   );
-}
-
-function normalizeFiveEToolsBaseUrl(baseUrl = 'https://5e.tools/') {
-  const trimmed = baseUrl.trim() || 'https://5e.tools/';
-  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
 }
 
 function mergeDoorPatch(door, patch) {
@@ -2052,44 +1831,9 @@ function clampBoardTiles(value) {
   return Math.max(4, Math.min(200, Number(value) || 24));
 }
 
-function monsterTokenSize(monster) {
-  const size = Array.isArray(monster.size) ? monster.size[0] : monster.size;
-  return { T: 1, S: 1, M: 1, L: 2, H: 3, G: 4, C: 5 }[size] || 1;
-}
 
-function monsterVisionFeet(monster) {
-  const senses = Array.isArray(monster.senses) ? monster.senses.join(' ') : '';
-  const match = senses.match(/darkvision\s+(\d+)/i);
-  return match ? Number(match[1]) : 0;
-}
 
-function monsterColor(monster) {
-  const type = typeof monster.type === 'string' ? monster.type : monster.type?.type;
-  const colors = {
-    aberration: '#8b5cf6',
-    beast: '#36d399',
-    celestial: '#f2c94c',
-    construct: '#94a3b8',
-    dragon: '#df5d52',
-    elemental: '#38bdf8',
-    fey: '#ec4899',
-    fiend: '#ef4444',
-    giant: '#f97316',
-    humanoid: '#3ea7ff',
-    monstrosity: '#a855f7',
-    ooze: '#84cc16',
-    plant: '#22c55e',
-    undead: '#64748b',
-  };
-  return colors[type] || '#df5d52';
-}
 
-function monsterTokenImage(baseUrl, monster) {
-  if (!monster.name || !monster.source) return '';
-  const source = encodeURIComponent(monster.source);
-  const name = encodeURIComponent(monster.name).replace(/'/g, '%27');
-  return `${normalizeFiveEToolsBaseUrl(baseUrl)}img/bestiary/tokens/${source}/${name}.webp`;
-}
 
 function vehiclePassengerIds(tokens, vehicle, excludedIds = new Set()) {
   const footprint = tokenFootprint(vehicle);
@@ -2101,13 +1845,4 @@ function vehiclePassengerIds(tokens, vehicle, excludedIds = new Set()) {
   }, new Set());
 }
 
-function formatMonsterCr(monster) {
-  if (monster.cr == null) return '?';
-  if (typeof monster.cr === 'object') return monster.cr.cr || '?';
-  return monster.cr;
-}
 
-function formatMonsterSize(monster) {
-  const size = Array.isArray(monster.size) ? monster.size[0] : monster.size;
-  return { T: 'Tiny', S: 'Small', M: 'Medium', L: 'Large', H: 'Huge', G: 'Gargantuan', C: 'Colossal' }[size] || 'Medium';
-}

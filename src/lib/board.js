@@ -166,7 +166,17 @@ export function normalizeLibraryToken(token = {}) {
     visionMode: token.visionMode || 'darkvision',
     visionEnabled: token.visionEnabled ?? true,
     vehicle,
+    meta: normalizeTokenMeta(token.meta),
   };
+}
+
+function normalizeTokenMeta(meta) {
+  if (!meta || typeof meta !== 'object') return null;
+  const normalized = {};
+  ['cr', 'type', 'sizeName', 'ac', 'hp', 'source', 'origin'].forEach((key) => {
+    if (meta[key] != null && meta[key] !== '') normalized[key] = String(meta[key]);
+  });
+  return Object.keys(normalized).length ? normalized : null;
 }
 
 export function normalizeBoardToken(token = {}) {
