@@ -821,6 +821,20 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     }
   };
 
+  const changeSelectionLayer = (target, layer) => {
+    if (!target) return;
+    const items = target.type === 'multi' ? target.items : [target];
+    const tokenIds = new Set(items.filter((item) => item.type === 'token').map((item) => item.id));
+    const drawingIds = new Set(items.filter((item) => item.type === 'drawing').map((item) => item.id));
+    if (!tokenIds.size && !drawingIds.size) return;
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      tokens: tokenIds.size ? active.tokens.map((token) => tokenIds.has(token.id) ? { ...token, layer } : token) : active.tokens,
+      drawings: drawingIds.size ? active.drawings.map((drawing) => drawingIds.has(drawing.id) ? { ...drawing, layer } : drawing) : active.drawings,
+    })));
+    switchActiveLayer(layer === 'dm' ? 'gm' : 'token');
+  };
+
   const moveDoorToPosition = (door, position) => {
     const dx = Number(position.x) - door.position.x;
     const dy = Number(position.y) - door.position.y;
@@ -1035,6 +1049,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             onToggleDoor={toggleDoor}
             onDeleteSelection={deleteSelection}
             onDuplicateSelection={duplicateSelection}
+            onChangeSelectionLayer={changeSelectionLayer}
           />
         </div>
       </section>

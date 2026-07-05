@@ -54,6 +54,7 @@ export function BoardCanvas({
   onToggleDoor,
   onDeleteSelection,
   onDuplicateSelection,
+  onChangeSelectionLayer,
   fitToViewport = false,
   playerZoom = 1,
   playerRotation = 0,
@@ -277,7 +278,7 @@ export function BoardCanvas({
     };
   };
 
-  const tokenAt = (point) => [...activeCanvasTokens]
+  const tokenHitTest = (tokens, point) => [...tokens]
     .filter((token) => {
       if (hexBoard && token.tokenKind === 'hex50') {
         const center = cellCenterPixels(token, board);
@@ -292,7 +293,12 @@ export function BoardCanvas({
       return (aFootprint.width * aFootprint.height) - (bFootprint.width * bFootprint.height);
     })[0];
 
+  const tokenAt = (point) => tokenHitTest(activeCanvasTokens, point);
+  // On the token/GM layers, selection falls through to tokens and drawings on the
+  // other of the two layers; the portal switches the active layer to match.
+  const crossLayerTokenAt = (point) => ['token', 'gm'].includes(activeLayer) ? tokenHitTest(dmTokens, point) : null;
   const drawingAt = (point) => [...activeCanvasDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing));
+  const crossLayerDrawingAt = (point) => ['token', 'gm'].includes(activeLayer) ? [...visibleDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing)) : null;
   const wallAt = (point) => activeLayer === 'walls' ? [...lighting.walls].reverse().find((wall) => isPointNearWall(point, wall)) : null;
   const doorAt = (point) => activeLayer === 'walls' ? [...visibleDoors].reverse().find((door) => Math.hypot(point.x - door.position.x, point.y - door.position.y) <= 0.45) : null;
   const isSelected = (type, id) => selectedItems.some((item) => item.type === type && item.id === id);
@@ -312,8 +318,8 @@ export function BoardCanvas({
     const point = pointFromEvent(event);
     const snapped = snapToTile(point, board);
     const wallPoint = lighting.snapWallsToGrid ? snapped : clampPoint(point, board);
-    const token = tokenAt(point);
-    const drawing = drawingAt(point);
+    const token = tool === 'select' ? tokenAt(point) || crossLayerTokenAt(point) : tokenAt(point);
+    const drawing = tool === 'select' ? drawingAt(point) || crossLayerDrawingAt(point) : drawingAt(point);
     const wall = wallAt(point);
     const door = doorAt(point);
 
@@ -573,13 +579,15 @@ export function BoardCanvas({
     event.preventDefault();
     if (tool === 'light') return;
     const point = pointFromEvent(event);
-    const token = tokenAt(point);
-    const drawing = drawingAt(point);
+    const token = tokenAt(point) || crossLayerTokenAt(point);
+    const drawing = drawingAt(point) || crossLayerDrawingAt(point);
     const wall = wallAt(point);
     const door = doorAt(point);
     if (!token && !drawing && !door && !wall) return;
-    const target = token ? { type: 'token', id: token.id } : drawing ? { type: 'drawing', id: drawing.id } : door ? { type: 'door', id: door.id } : { type: 'wall', id: wall.id };
-    setSelected(target);
+    const clicked = token ? { type: 'token', id: token.id } : drawing ? { type: 'drawing', id: drawing.id } : door ? { type: 'door', id: door.id } : { type: 'wall', id: wall.id };
+    const partOfSelection = isSelected(clicked.type, clicked.id);
+    const target = partOfSelection && selected?.type === 'multi' ? selected : clicked;
+    if (!partOfSelection) setSelected(clicked);
     setContextMenu({ x: point.px, y: point.py, target });
   };
 
@@ -908,13 +916,34 @@ export function BoardCanvas({
               <button onClick={() => { onRequestLibraryToken?.(tokenPrompt.cell); setTokenPrompt(null); }}>From library…</button>
             </div>
           )}
-          {contextMenu && (
-            <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
-              <button onClick={() => { onDuplicateSelection(contextMenu.target); setContextMenu(null); }}>Duplicate</button>
-              {contextMenu.target.type === 'door' && <button onClick={() => { onToggleDoor(contextMenu.target.id); setContextMenu(null); }}>Toggle open/closed</button>}
-              <button onClick={() => { onDeleteSelection(contextMenu.target); setContextMenu(null); }}>Delete</button>
-            </div>
-          )}
+          {contextMenu && (() => {
+            const menuItems = contextMenu.target.type === 'multi' ? contextMenu.target.items : [contextMenu.target];
+            const entityLayers = new Set(menuItems.flatMap((item) => {
+              if (item.type === 'token') {
+                const entity = board.tokens.find((candidate) => candidate.id === item.id);
+                return entity ? [entity.layer === 'dm' ? 'dm' : 'player'] : [];
+              }
+              if (item.type === 'drawing') {
+                const entity = board.drawings.find((candidate) => candidate.id === item.id);
+                return entity ? [entity.layer === 'dm' ? 'dm' : 'player'] : [];
+              }
+              return [];
+            }));
+            const layerLabel = contextMenu.target.type === 'multi' ? 'Move all to' : 'Move to';
+            return (
+              <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+                {contextMenu.target.type !== 'multi' && <button onClick={() => { onDuplicateSelection(contextMenu.target); setContextMenu(null); }}>Duplicate</button>}
+                {contextMenu.target.type === 'door' && <button onClick={() => { onToggleDoor(contextMenu.target.id); setContextMenu(null); }}>Toggle open/closed</button>}
+                {entityLayers.has('player') && (
+                  <button onClick={() => { onChangeSelectionLayer?.(contextMenu.target, 'dm'); setContextMenu(null); }}>{layerLabel} GM layer</button>
+                )}
+                {entityLayers.has('dm') && (
+                  <button onClick={() => { onChangeSelectionLayer?.(contextMenu.target, 'player'); setContextMenu(null); }}>{layerLabel} Token layer</button>
+                )}
+                <button onClick={() => { onDeleteSelection(contextMenu.target); setContextMenu(null); }}>Delete</button>
+              </div>
+            );
+          })()}
           {lockedDoorAlert && (
             <div className="door-alert" style={{ left: lockedDoorAlert.x, top: lockedDoorAlert.y }}>
               Locked
