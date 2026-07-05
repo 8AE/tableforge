@@ -64,12 +64,14 @@ export function BoardCanvas({
   const backgroundVideoRef = useRef(null);
   const [fitScale, setFitScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dmZoom, setDmZoom] = useState(1);
+  const zoomAnchorRef = useRef(null);
   const tile = board.tileSize;
   const boardSize = boardPixelSize(board);
   const width = boardSize.width;
   const height = boardSize.height;
   const hexBoard = isHexBoard(board);
-  const scale = fitScale * playerZoom;
+  const scale = fitScale * (view === 'dm' ? dmZoom : playerZoom);
   const normalizedRotation = ((playerRotation % 360) + 360) % 360;
   const isRotatedSideways = normalizedRotation === 90 || normalizedRotation === 270;
   const stageWidth = (isRotatedSideways ? height : width) * scale;
@@ -170,6 +172,51 @@ export function BoardCanvas({
   }, [fitToViewport, width, height]);
 
   useEffect(() => {
+    if (view !== 'dm' || !shellRef.current) return undefined;
+    const shell = shellRef.current;
+    const onWheel = (event) => {
+      event.preventDefault();
+      setDmZoom((current) => {
+        const next = Math.max(0.25, Math.min(3, current * Math.exp(-event.deltaY * 0.0015)));
+        if (next !== current) {
+          const rect = shell.getBoundingClientRect();
+          zoomAnchorRef.current = {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+            ratio: next / current,
+          };
+        }
+        return next;
+      });
+    };
+    shell.addEventListener('wheel', onWheel, { passive: false });
+    return () => shell.removeEventListener('wheel', onWheel);
+  }, [view]);
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const anchor = zoomAnchorRef.current;
+    if (!shell || !anchor) return;
+    zoomAnchorRef.current = null;
+    shell.scrollLeft = (shell.scrollLeft + anchor.x) * anchor.ratio - anchor.x;
+    shell.scrollTop = (shell.scrollTop + anchor.y) * anchor.ratio - anchor.y;
+  }, [dmZoom]);
+
+  useEffect(() => {
+    if (!drag && !contextMenu) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (drag?.type === 'ruler') onLiveMeasurement?.(null);
+      setDrag(null);
+      setContextMenu(null);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [drag, contextMenu, onLiveMeasurement]);
+
+  useEffect(() => {
     if (background.type !== 'video' || !background.src) return undefined;
     const video = backgroundVideoRef.current;
     if (!video) return undefined;
@@ -250,6 +297,15 @@ export function BoardCanvas({
   const onPointerDown = (event) => {
     if (view !== 'dm') return;
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (event.button === 1) {
+      event.preventDefault();
+      setDrag({
+        type: 'pan-scroll',
+        start: { x: event.clientX, y: event.clientY },
+        original: { left: shellRef.current?.scrollLeft || 0, top: shellRef.current?.scrollTop || 0 },
+      });
+      return;
+    }
     const point = pointFromEvent(event);
     const snapped = snapToTile(point, board);
     const wallPoint = lighting.snapWallsToGrid ? snapped : clampPoint(point, board);
@@ -396,6 +452,15 @@ export function BoardCanvas({
 
     if (drag.type === 'pan') {
       setPan({ x: drag.original.x + event.clientX - drag.start.x, y: drag.original.y + event.clientY - drag.start.y });
+      return;
+    }
+
+    if (drag.type === 'pan-scroll') {
+      const shell = shellRef.current;
+      if (shell) {
+        shell.scrollLeft = drag.original.left - (event.clientX - drag.start.x);
+        shell.scrollTop = drag.original.top - (event.clientY - drag.start.y);
+      }
       return;
     }
 
@@ -631,6 +696,12 @@ export function BoardCanvas({
   const liveMarquee = drag?.type === 'marquee' ? marqueeBounds(drag) : null;
 
   return (
+    <>
+    {view === 'dm' && Math.abs(dmZoom - 1) > 0.01 && (
+      <button type="button" className="dm-zoom-indicator" title="Reset zoom to 100%" onClick={() => setDmZoom(1)}>
+        {Math.round(dmZoom * 100)}% · Reset
+      </button>
+    )}
     <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
       <div className="board-stage" style={{ width: stageWidth, height: stageHeight }}>
         <div
@@ -841,6 +912,7 @@ export function BoardCanvas({
         </div>
       </div>
     </div>
+    </>
   );
 }
 

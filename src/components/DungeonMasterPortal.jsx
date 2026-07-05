@@ -604,7 +604,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     const publishedBoard = state.boards.find((item) => item.id === boardId) || board;
     const timestamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     setState((current) => ({ ...current, playerBoardId: boardId }), { skipHistory: true });
-    setPublishToast(`Active Board Published to Players ${timestamp}: ${publishedBoard.name}`);
+    setPublishToast(`Players now see “${publishedBoard.name}” · ${timestamp}`);
     window.setTimeout(() => setPublishToast(''), 2600);
     window.setTimeout(() => publishProjectToPlayers(openProjectId), 320);
   };
@@ -884,6 +884,16 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     const onKeyDown = (event) => {
       const mod = event.metaKey || event.ctrlKey;
       const tag = event.target?.tagName?.toLowerCase();
+      if (event.key === 'Escape') {
+        if (isLibraryOpen) setIsLibraryOpen(false);
+        else if (isDungeonImportOpen) setIsDungeonImportOpen(false);
+        else if (isFiveEToolsMapImportOpen) setIsFiveEToolsMapImportOpen(false);
+        else if (boardDeleteTarget) setBoardDeleteTarget(null);
+        else if (['input', 'select', 'textarea'].includes(tag)) event.target.blur?.();
+        else if (selected) selectTarget(null);
+        else if (tool !== 'select') activateTool('select');
+        return;
+      }
       if (['input', 'select', 'textarea'].includes(tag)) return;
       const keyTools = { v: 'select', t: 'token', d: 'draw', m: 'ruler', l: 'light' };
       if (!event.metaKey && !event.ctrlKey && keyTools[event.key.toLowerCase()]) {
@@ -932,7 +942,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo]);
+  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo, tool, isLibraryOpen, isDungeonImportOpen, isFiveEToolsMapImportOpen, boardDeleteTarget]);
 
   return (
     <>
@@ -956,6 +966,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onDeleteBoard={requestDeleteBoard}
           onPublishBoard={showBoardToPlayers}
           onProjectHome={leaveProject}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
         />
         <div className="map-viewport">
           {layerNotice && <div className="layer-notice" role="status">{layerNotice}</div>}
@@ -1158,11 +1172,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           <div className="split">
             <label>
               Cells wide
-              <input type="number" min="4" max="200" value={board.columns} onChange={(event) => updateBoard({ columns: Number(event.target.value) })} />
+              <ClampedNumberInput min={4} max={200} value={board.columns} onCommit={(value) => updateBoard({ columns: value })} />
             </label>
             <label>
               Cells high
-              <input type="number" min="4" max="200" value={board.rows} onChange={(event) => updateBoard({ rows: Number(event.target.value) })} />
+              <ClampedNumberInput min={4} max={200} value={board.rows} onCommit={(value) => updateBoard({ rows: value })} />
             </label>
           </div>
           <p className="empty-note">{boardGridLabel(board)}</p>
@@ -1581,7 +1595,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                     ))}
                   </div>
                 ) : (
-                  <p className="empty-note">Upload audio assets from the Campaign tab to build the soundboard.</p>
+                  <p className="empty-note">Upload audio files from the Assets tab to build the soundboard.</p>
                 )}
               </Panel>
             </div>
@@ -1848,6 +1862,29 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       )}
 
     </>
+  );
+}
+
+function ClampedNumberInput({ value, min, max, onCommit }) {
+  const [draft, setDraft] = useState(null);
+  const commit = () => {
+    if (draft === null) return;
+    const parsed = Math.round(Number(draft));
+    if (Number.isFinite(parsed) && draft !== '') {
+      onCommit(Math.max(min, Math.min(max, parsed)));
+    }
+    setDraft(null);
+  };
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      value={draft ?? value}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => { if (event.key === 'Enter') event.target.blur(); }}
+    />
   );
 }
 
