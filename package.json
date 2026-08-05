@@ -1,6 +1,6 @@
 {
   "name": "tableforge",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Desktop-ready Dungeons & Dragons table display.",
   "author": "Tableforge",
   "private": true,
@@ -10,6 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "host": "vite build && node server.js",
     "build": "vite build",
+    "test": "node --test",
     "preview": "vite preview --host 127.0.0.1",
     "server": "node server.js",
     "migrate:projects": "node scripts/migrate-project-storage.js",

@@ -21,6 +21,7 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Edit selected tokens, including color and uploaded token artwork.
 - Open a project-wide searchable token library with quick stats (CR, AC, HP, size, vision, source) for each saved token, edit tokens in a dedicated popup, and import them onto any board in the project.
 - Search monsters from the 5e.tools bestiary (including custom locally hosted base URLs) or the public Open 5e API, review their stats, and save them into the project token library.
+- Create a campaign from a 5e.tools adventure book or add a book to an existing campaign, with every DM and player map selected by default and an option to exclude individual maps.
 - Configure token vision distance and quickly toggle token vision on or off for board lighting.
 - Duplicate or delete tokens and drawings from the right-click menu in the DM view.
 - Enable board lighting, manually reveal lit areas, draw light-blocking walls, and preview player visibility in the DM view.
@@ -82,6 +83,7 @@ npm run preview
 - The DM starts on the project home screen, opens one project at a time, and can return home with **Project home**.
 - Projects are saved on the host machine in `data/projects.json`.
 - Existing boards use the standard 5 ft square grid. New boards can be created as either 5 ft square grids or 50 ft hex grids from the board drawer.
+- Use **Create from 5e.tools campaign** on the project launcher, or **Import from 5e.tools** inside an open project, to select a book and import its chosen DM and player maps as boards.
 - 50 ft hex boards render hexagon outlines and are intended for ship combat, air combat, and other large-scale scenes.
 - 50 ft hex tokens are a separate token type and occupy one 50 ft hex cell by default.
 - Use **Show active board to players** in the DM portal to transition the player viewer to a different board.
