@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Copy, Expand, Home, Plus, RotateCcw, RotateCw, Search, Settings, Trash2, Users } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Copy, Expand, Home, Plus, Redo2, RotateCcw, RotateCw, Search, Settings, Trash2, Undo2, Users } from 'lucide-react';
 import { boardGridLabel } from '../lib/board';
 
 const layerOptions = [
@@ -29,9 +29,22 @@ export function Topbar({
   onToggleZoom,
   onRotateLeft,
   onRotateRight,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
 }) {
   const playerUrl = `${window.location.origin}${window.location.pathname}?view=player`;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isDrawerOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setIsDrawerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isDrawerOpen]);
   return (
     <header className={`topbar ${isDrawerOpen ? 'drawer-open' : ''}`}>
       <div className="topbar-main">
@@ -63,7 +76,26 @@ export function Topbar({
         )}
       </div>
       <div className="top-actions">
-        {mode === 'dm' && <span className={`player-ribbon-status ${playerBoardId === activeBoardId ? 'live' : ''}`}><Users size={16} /> {playerBoardId === activeBoardId ? 'Players live here' : 'Players on another board'}</span>}
+        {mode === 'dm' && (
+          <div className="history-actions">
+            <button type="button" title="Undo (Ctrl+Z)" aria-label="Undo" onClick={onUndo} disabled={!canUndo}><Undo2 size={16} /></button>
+            <button type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" onClick={onRedo} disabled={!canRedo}><Redo2 size={16} /></button>
+          </div>
+        )}
+        {mode === 'dm' && (
+          playerBoardId === activeBoardId ? (
+            <span className="player-ribbon-status live"><Users size={16} /> Players live here</span>
+          ) : (
+            <button
+              type="button"
+              className="player-ribbon-status publish-button"
+              title="Publish this board so players see it"
+              onClick={() => onPublishBoard?.(activeBoardId)}
+            >
+              <Users size={16} /> Bring players here
+            </button>
+          )
+        )}
         {mode === 'dm' && <a className="ghost-link" href={playerUrl} target="_blank" rel="noreferrer"><Users size={16} /> Open player view</a>}
         {mode === 'player' && <button onClick={onToggleZoom}><Search size={16} /> Zoom</button>}
         {mode === 'player' && <button title="Rotate board counter clockwise" onClick={onRotateLeft}><RotateCcw size={16} /> Rotate</button>}
@@ -105,6 +137,15 @@ export function Topbar({
                   <span>{item.columns} x {item.rows} · {boardGridLabel(item)} · {item.id === playerBoardId ? 'Published' : 'DM only'}</span>
                 </div>
                 <div className="page-card-actions">
+                  <button
+                    type="button"
+                    className={item.id === playerBoardId ? 'publish-action live' : 'publish-action'}
+                    title={item.id === playerBoardId ? 'Players are viewing this board' : 'Publish this board to players'}
+                    disabled={item.id === playerBoardId}
+                    onClick={() => onPublishBoard?.(item.id)}
+                  >
+                    <Users size={14} />
+                  </button>
                   <button type="button" title="Board settings" onClick={() => onBoardSelect?.(item.id)}><Settings size={14} /></button>
                   <button type="button" title="Duplicate board" onClick={() => onDuplicateBoard?.(item.id)}><Copy size={14} /></button>
                   <button type="button" title="Delete board" disabled={boards.length <= 1} onClick={() => onDeleteBoard?.(item)}><Trash2 size={14} /></button>

@@ -89,6 +89,7 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
   const [name, setName] = useState('New Campaign');
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [importFile, setImportFile] = useState(null);
   const [importConflict, setImportConflict] = useState(null);
   const [importMessage, setImportMessage] = useState('');
@@ -150,7 +151,15 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
             {projects.map((project) => (
               <div className="project-row" key={project.id}>
                 {editingId === project.id ? (
-                  <input value={editingName} onChange={(event) => setEditingName(event.target.value)} />
+                  <input
+                    value={editingName}
+                    autoFocus
+                    onChange={(event) => setEditingName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') { onRenameProject(project.id, editingName); setEditingId(null); }
+                      if (event.key === 'Escape') setEditingId(null);
+                    }}
+                  />
                 ) : (
                   <button onClick={() => onOpenProject(project.id)}>{project.name}</button>
                 )}
@@ -160,12 +169,16 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
                   <button onClick={() => { setEditingId(project.id); setEditingName(project.name); }}>Rename</button>
                 )}
                 <a href={`/api/projects/${encodeURIComponent(project.id)}/export`} download={`${project.name}.zip`}>Export</a>
-                <button className="danger-text" onClick={() => onDeleteProject(project.id)}>Delete</button>
+                <button className="danger-text" onClick={() => setDeleteTarget(project)}>Delete</button>
               </div>
             ))}
           </div>
           <div className="project-create">
-            <input value={name} onChange={(event) => setName(event.target.value)} />
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') onCreateProject(name || 'New Campaign'); }}
+            />
             <button onClick={() => onCreateProject(name || 'New Campaign')}>Create project</button>
             <button className="project-create-book" onClick={() => setIsBookImportOpen(true)}>
               <BookOpen size={16} /> Create from 5e.tools campaign
@@ -187,6 +200,20 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
       <footer className="project-build-info">
         v{appVersion} · {gitCommit}
       </footer>
+      {deleteTarget && (
+        <div className="project-conflict-overlay" role="dialog" aria-modal="true" aria-label="Delete campaign">
+          <div className="project-conflict-modal">
+            <strong>Delete Campaign</strong>
+            <p>
+              Delete “{deleteTarget.name}”? This permanently removes the campaign and all of its boards, tokens, maps, and uploaded assets.
+            </p>
+            <div className="project-conflict-actions">
+              <button className="danger-text" onClick={() => { onDeleteProject(deleteTarget.id); setDeleteTarget(null); }}>Delete Campaign</button>
+              <button onClick={() => setDeleteTarget(null)} autoFocus>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {importConflict && (
         <div className="project-conflict-overlay" role="dialog" aria-modal="true" aria-label="Project import conflict">
           <div className="project-conflict-modal">

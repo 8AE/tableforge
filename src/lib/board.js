@@ -166,7 +166,17 @@ export function normalizeLibraryToken(token = {}) {
     visionMode: token.visionMode || 'darkvision',
     visionEnabled: token.visionEnabled ?? true,
     vehicle,
+    meta: normalizeTokenMeta(token.meta),
   };
+}
+
+function normalizeTokenMeta(meta) {
+  if (!meta || typeof meta !== 'object') return null;
+  const normalized = {};
+  ['cr', 'type', 'sizeName', 'ac', 'hp', 'source', 'origin'].forEach((key) => {
+    if (meta[key] != null && meta[key] !== '') normalized[key] = String(meta[key]);
+  });
+  return Object.keys(normalized).length ? normalized : null;
 }
 
 export function normalizeBoardToken(token = {}) {
@@ -269,13 +279,14 @@ export function incompatibleTokenGridMessage(token = {}, board = {}) {
 }
 
 export function boardPixelSize(board = {}) {
-  const tile = Number(board.tileSize) || 42;
   if (isHexBoard(board)) {
+    const { width, height } = hexCellMetrics(board);
     return {
-      width: (Number(board.columns || 0) + 0.5) * tile,
-      height: ((Number(board.rows || 0) * 0.75) + 0.25) * tile,
+      width: (Number(board.columns || 0) + 0.5) * width,
+      height: ((Number(board.rows || 0) * 0.75) + 0.25) * height,
     };
   }
+  const tile = Number(board.tileSize) || 42;
   return {
     width: (Number(board.columns || 0) * tile),
     height: (Number(board.rows || 0) * tile),
@@ -299,6 +310,10 @@ export function cellCenter(cell = {}, board = {}) {
 
 export function cellCenterPixels(cell = {}, board = {}) {
   const center = cellCenter(cell, board);
+  if (isHexBoard(board)) {
+    const { width, height } = hexCellMetrics(board);
+    return { x: center.x * width, y: center.y * height };
+  }
   const tile = Number(board.tileSize) || 42;
   return { x: center.x * tile, y: center.y * tile };
 }
@@ -307,11 +322,12 @@ export function tokenPixelBox(token = {}, board = {}) {
   const tile = Number(board.tileSize) || 42;
   const footprint = tokenFootprint(token);
   if (isHexBoard(board) && token.tokenKind === 'hex50') {
+    const { width } = hexCellMetrics(board);
     const center = cellCenterPixels(token, board);
     return {
-      left: center.x - tile / 2,
+      left: center.x - width / 2,
       top: center.y - tile / 2,
-      width: tile,
+      width,
       height: tile,
     };
   }
@@ -331,6 +347,14 @@ export function hexPolygonPoints(cell = {}, board = {}) {
     const angle = (-90 + index * 60) * (Math.PI / 180);
     return `${center.x + Math.cos(angle) * radius},${center.y + Math.sin(angle) * radius}`;
   }).join(' ');
+}
+
+export function hexCellMetrics(board = {}) {
+  const height = Number(board.tileSize) || 42;
+  return {
+    width: height * Math.sqrt(3 / 4),
+    height,
+  };
 }
 
 function clampVehicleDimension(value) {
