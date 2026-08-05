@@ -507,6 +507,188 @@ input[type="range"] {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.fiveetools-importer {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.fiveetools-import-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.fiveetools-import-tabs button,
+.fiveetools-map-selection-header button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #d8d1c4;
+  border: 1px solid rgba(245, 243, 237, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.fiveetools-import-tabs button.active {
+  color: #f5f3ed;
+  border-color: rgba(54, 211, 153, 0.5);
+  background: rgba(54, 211, 153, 0.14);
+}
+
+.fiveetools-importer .map-import {
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+}
+
+.fiveetools-base-url-row,
+.fiveetools-book-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 0.55fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.fiveetools-base-url-row > label,
+.fiveetools-book-picker > label {
+  margin: 0;
+}
+
+.fiveetools-base-url-row > button {
+  margin: 0;
+}
+
+.fiveetools-book-maps {
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.fiveetools-map-selection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fiveetools-map-selection-header strong,
+.fiveetools-map-selection-header span {
+  display: block;
+}
+
+.fiveetools-map-selection-header strong {
+  color: #f5f3ed;
+}
+
+.fiveetools-map-selection-header span {
+  margin-top: 3px;
+  color: #b7b0a2;
+  font-size: 12px;
+}
+
+.fiveetools-map-selection-header > div:last-child {
+  display: flex;
+  gap: 6px;
+}
+
+.fiveetools-map-selection-header button {
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.fiveetools-map-checklist {
+  display: grid;
+  gap: 6px;
+  max-height: min(390px, 42vh);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.fiveetools-map-option {
+  display: grid;
+  grid-template-columns: auto 58px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(245, 243, 237, 0.11);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: 58px;
+}
+
+.fiveetools-map-option:has(input:checked) {
+  border-color: rgba(54, 211, 153, 0.3);
+  background: rgba(54, 211, 153, 0.07);
+}
+
+.fiveetools-map-option input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+}
+
+.fiveetools-map-option strong,
+.fiveetools-map-option small {
+  display: block;
+}
+
+.fiveetools-map-option strong {
+  overflow: hidden;
+  color: #f5f3ed;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fiveetools-map-option small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: #a9a295;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-kind {
+  display: inline-grid;
+  place-items: center;
+  min-height: 24px;
+  border: 1px solid rgba(245, 243, 237, 0.12);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.map-kind.dm {
+  color: #ffb4aa;
+  background: rgba(223, 93, 82, 0.12);
+}
+
+.map-kind.player {
+  color: #9ff0c5;
+  background: rgba(54, 211, 153, 0.12);
+}
+
+.fiveetools-import-action {
+  position: sticky;
+  bottom: 0;
+}
+
+.fiveetools-import-progress {
+  margin: 0;
+  color: #9ff0c5;
+  font-size: 12px;
+}
+
 .asset-dropzone {
   min-height: 108px;
   place-items: center;
@@ -2026,6 +2208,15 @@ input[type="range"] {
   background: rgba(255, 255, 255, 0.07);
 }
 
+.project-create-book {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-color: rgba(54, 211, 153, 0.42) !important;
+  background: rgba(54, 211, 153, 0.11) !important;
+}
+
 .project-list a,
 .project-import-button {
   display: inline-grid;
@@ -2331,7 +2522,7 @@ button.dungeon-thumb {
 }
 
 .map-import-modal {
-  width: min(760px, 100%);
+  width: min(920px, 100%);
   grid-template-rows: auto 1fr;
 }
 
@@ -2341,6 +2532,14 @@ button.dungeon-thumb {
 
 .map-import-modal .map-results {
   max-height: min(420px, 48vh);
+}
+
+.campaign-book-create-modal {
+  grid-template-rows: auto auto 1fr;
+}
+
+.campaign-import-name {
+  margin: 0;
 }
 
 .danger-text {
@@ -2425,6 +2624,20 @@ button.dungeon-thumb {
   .project-import-button,
   .project-conflict-actions button {
     width: 100%;
+  }
+
+  .fiveetools-base-url-row,
+  .fiveetools-book-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .fiveetools-map-selection-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fiveetools-map-selection-header > div:last-child button {
+    flex: 1;
   }
 
   .project-row {

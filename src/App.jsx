@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Github } from 'lucide-react';
+import { BookOpen, Github, X } from 'lucide-react';
 import { DungeonBuilder } from './components/DungeonBuilder';
 import { DungeonMasterPortal } from './components/DungeonMasterPortal';
+import { FiveEToolsMapImporter } from './components/FiveEToolsMapImporter';
 import { PlayerViewer } from './components/PlayerViewer';
 import { useSyncedBoard } from './hooks/useSyncedBoard';
 
@@ -25,6 +26,7 @@ export function App() {
     deleteProject,
     deleteBoard,
     importProject,
+    importFiveEToolsMaps,
     publishProjectToPlayers,
     updateProjectState,
     undo,
@@ -69,6 +71,7 @@ export function App() {
           leaveProject={leaveProject}
           publishProjectToPlayers={publishProjectToPlayers}
           deleteBoard={deleteBoard}
+          importFiveEToolsMaps={importFiveEToolsMaps}
           undo={undo}
           redo={redo}
           canUndo={canUndo}
@@ -90,6 +93,9 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
   const [importConflict, setImportConflict] = useState(null);
   const [importMessage, setImportMessage] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [isBookImportOpen, setIsBookImportOpen] = useState(false);
+  const [bookCampaignName, setBookCampaignName] = useState('');
+  const [fiveEToolsBaseUrl, setFiveEToolsBaseUrl] = useState('https://5e.tools/');
 
   const importSelectedFile = async (file, overwrite = false) => {
     if (!file) return;
@@ -115,6 +121,11 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
     const file = event.target.files?.[0];
     event.target.value = '';
     if (file) importSelectedFile(file, false);
+  };
+
+  const createCampaignFromBook = (maps, { book, baseUrl, onProgress }) => {
+    const campaignName = bookCampaignName.trim() || book?.name || 'New Campaign';
+    return onCreateProject(campaignName, { maps, baseUrl, onProgress });
   };
 
   return (
@@ -156,6 +167,9 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
           <div className="project-create">
             <input value={name} onChange={(event) => setName(event.target.value)} />
             <button onClick={() => onCreateProject(name || 'New Campaign')}>Create project</button>
+            <button className="project-create-book" onClick={() => setIsBookImportOpen(true)}>
+              <BookOpen size={16} /> Create from 5e.tools campaign
+            </button>
           </div>
         </div>
 
@@ -185,6 +199,30 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
               <button className="danger-text" disabled={isImporting} onClick={() => importSelectedFile(importFile, true)}>Overwrite and Replace</button>
               <button onClick={() => { setImportConflict(null); setImportFile(null); }}>Cancel</button>
             </div>
+          </div>
+        </div>
+      )}
+      {isBookImportOpen && (
+        <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Create campaign from 5e.tools">
+          <div className="library-modal map-import-modal campaign-book-create-modal">
+            <header className="library-modal-header">
+              <div>
+                <strong>Create Campaign from 5e.tools</strong>
+                <span>Select a campaign book, then remove any DM or player maps you do not want.</span>
+              </div>
+              <button title="Close campaign import" onClick={() => setIsBookImportOpen(false)}><X size={18} /></button>
+            </header>
+            <label className="campaign-import-name">
+              Campaign name
+              <input value={bookCampaignName} onChange={(event) => setBookCampaignName(event.target.value)} placeholder="Defaults to the selected book title" />
+            </label>
+            <FiveEToolsMapImporter
+              baseUrl={fiveEToolsBaseUrl}
+              onBaseUrlChange={setFiveEToolsBaseUrl}
+              onImportMaps={createCampaignFromBook}
+              allowSingleMap={false}
+              bulkActionLabel="Create campaign with selected maps"
+            />
           </div>
         </div>
       )}

@@ -33,12 +33,14 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { BoardCanvas } from './BoardCanvas';
+import { FiveEToolsMapImporter } from './FiveEToolsMapImporter';
 import { Panel } from './Panel';
 import { Topbar } from './Topbar';
 import { areTokenAndBoardCompatible, boardGridLabel, boxesOverlap, defaultLighting, getBoard, getBoardEntity, GRID_HEX_50FT, incompatibleTokenGridMessage, isHexBoard, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, tokenFootprint, uid, updateActiveBoard } from '../lib/board';
 import { dungeonToBoard, normalizeDungeon } from '../lib/dungeon';
+import { normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
 
-export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
+export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, importFiveEToolsMaps, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
   const [tool, setTool] = useState('select');
   const [activeLayer, setActiveLayer] = useState('token');
   const [layerNotice, setLayerNotice] = useState('');
@@ -64,11 +66,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [bestiaryError, setBestiaryError] = useState('');
   const [isSearchingBestiary, setIsSearchingBestiary] = useState(false);
   const [vehicleImageAdjustTokenId, setVehicleImageAdjustTokenId] = useState(null);
-  const [mapQuery, setMapQuery] = useState('');
-  const [mapResults, setMapResults] = useState([]);
-  const [mapImportError, setMapImportError] = useState('');
-  const [isSearchingMaps, setIsSearchingMaps] = useState(false);
-  const [isImportingMap, setIsImportingMap] = useState(false);
   const [assets, setAssets] = useState([]);
   const [assetCategory, setAssetCategory] = useState('token');
   const [assetError, setAssetError] = useState('');
@@ -284,19 +281,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     return data.asset;
   };
 
-  const importRemoteProjectAsset = async ({ url, name, category = 'map' }) => {
-    if (!openProjectId) throw new Error('Open a campaign before importing a 5e.tools map.');
-    const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets/remote`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, name, category }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `Unable to import ${name || 'remote map image'}.`);
-    setAssets(data.assets || []);
-    return data.asset;
-  };
-
   const uploadProjectAssets = async (files) => {
     const fileList = Array.from(files || []);
     if (!openProjectId || !fileList.length) return;
@@ -446,78 +430,20 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     }
   };
 
-  const searchMaps = async () => {
-    const query = mapQuery.trim().toLowerCase();
-    if (!query) return;
-    setMapImportError('');
-    setMapResults([]);
-    setIsSearchingMaps(true);
-    try {
-      const baseUrl = normalizeFiveEToolsBaseUrl(state.fiveEToolsBaseUrl);
-      const data = await fetchMapsJson(baseUrl);
-      const matches = flattenMapData(data, baseUrl)
-        .filter((map) => map.searchText.includes(query))
-        .slice(0, 30);
-      setMapResults(matches);
-      if (!matches.length) setMapImportError('No matching maps found.');
-    } catch (error) {
-      setMapImportError(error.message || 'Unable to search 5e.tools maps.');
-    } finally {
-      setIsSearchingMaps(false);
-    }
-  };
-
-  const importMap = async (map) => {
-    setMapImportError('');
-    setIsImportingMap(true);
-    try {
-      const asset = await importRemoteProjectAsset({
-        url: map.imageUrl,
-        name: map.displayTitle || 'Imported Map',
-        category: 'map',
-      });
-      const dimensions = getMapBoardDimensions(map);
-      const importedWalls = getMapRegionWalls(map, dimensions);
-      const nextBoard = {
-        ...makeBoard(map.displayTitle || 'Imported Map'),
-        name: map.displayTitle || 'Imported Map',
-        columns: dimensions.columns,
-        rows: dimensions.rows,
-        background: {
-          src: asset.path,
-          x: 0,
-          y: 0,
-          scale: 1,
-          opacity: 1,
-          fitToBoard: true,
-        },
-        lighting: {
-          ...defaultLighting,
-          walls: importedWalls,
-        },
-        doors: [],
-        tokens: [],
-        drawings: [],
-      };
-      setState((current) => ({
-        ...current,
-        boards: [...current.boards, nextBoard],
-        activeBoardId: nextBoard.id,
-      }));
+  const importFiveEToolsMapSelection = async (maps, options) => {
+    const result = await importFiveEToolsMaps(maps, {
+      baseUrl: options.baseUrl,
+      onProgress: options.onProgress,
+    });
+    if (result.ok) {
+      setAssets(result.assets || []);
       setIsFiveEToolsMapImportOpen(false);
-      setMapImportError('');
-      setMapResults([]);
-      setMapQuery(map.displayTitle);
-    } catch (error) {
-      setMapImportError(error.message || 'Unable to import 5e.tools map.');
-    } finally {
-      setIsImportingMap(false);
     }
+    return result;
   };
 
   const useAssetAsMap = (asset) => {
     updateBackground({ src: asset.path, type: asset.type === 'video' ? 'video' : 'image', muted: true, opacity: 1, fitToBoard: true, x: 0, y: 0, scale: 1 });
-    setMapImportError('');
   };
 
   const useAssetForTokenDraft = (asset) => {
@@ -949,7 +875,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onAddBoard={addBoard}
           onImportBoard={openDungeonImport}
           onImportFiveEToolsMap={() => {
-            setMapImportError('');
             setIsFiveEToolsMapImportOpen(true);
           }}
           onDuplicateBoard={duplicateBoard}
@@ -1784,47 +1709,20 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       )}
 
       {isFiveEToolsMapImportOpen && (
-        <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Import map from 5e.tools">
+        <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Import from 5e.tools">
           <div className="library-modal map-import-modal">
             <header className="library-modal-header">
               <div>
-                <strong>Import Map from 5e.tools</strong>
-                <span>Search the map gallery and create a new board from the selected result.</span>
+                <strong>Import from 5e.tools</strong>
+                <span>Import one map or every selected DM and player map from a campaign book.</span>
               </div>
               <button title="Close map import" onClick={() => setIsFiveEToolsMapImportOpen(false)}><X size={18} /></button>
             </header>
-            <div className="map-import">
-              <label>
-                5e.tools base URL
-                <input value={state.fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => updateFiveEToolsBaseUrl(event.target.value)} />
-              </label>
-              <label>
-                Search maps
-                <input value={mapQuery} onChange={(event) => setMapQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchMaps(); }} placeholder="Cragmaw Hideout, Castle Ravenloft..." autoFocus />
-              </label>
-              <button className="command" title="Search the 5e.tools maps gallery" onClick={searchMaps} disabled={isSearchingMaps}>
-                <Library size={16} /> {isSearchingMaps ? 'Searching...' : 'Search maps'}
-              </button>
-              {mapImportError && <p className="form-error">{mapImportError}</p>}
-              {mapResults.length > 0 && (
-                <div className="map-results">
-                  {mapResults.map((map) => {
-                    const dimensions = getMapBoardDimensions(map);
-                    return (
-                      <div className="map-result" key={map.id}>
-                        <div>
-                          <strong>{map.displayTitle}</strong>
-                          <span>{map.sourceName} · {map.chapterName} · {dimensions.columns} x {dimensions.rows}</span>
-                        </div>
-                        <button className="command" title="Create a new board from this map" onClick={() => importMap(map)} disabled={isImportingMap}>
-                          <Image size={15} /> {isImportingMap ? 'Importing...' : 'Import'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <FiveEToolsMapImporter
+              baseUrl={state.fiveEToolsBaseUrl || 'https://5e.tools/'}
+              onBaseUrlChange={updateFiveEToolsBaseUrl}
+              onImportMaps={importFiveEToolsMapSelection}
+            />
           </div>
         </div>
       )}
@@ -1851,11 +1749,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   );
 }
 
-function normalizeFiveEToolsBaseUrl(baseUrl = 'https://5e.tools/') {
-  const trimmed = baseUrl.trim() || 'https://5e.tools/';
-  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
-}
-
 function mergeDoorPatch(door, patch) {
   const next = { ...door, ...patch };
   if (patch.state) {
@@ -1873,146 +1766,6 @@ async function fetchBestiaryJson(url) {
   const response = await fetch(`/api/5etools?url=${encodeURIComponent(url)}`);
   if (!response.ok) throw new Error(`Unable to load ${url}`);
   return response.json();
-}
-
-async function fetchMapsJson(baseUrl) {
-  try {
-    return await fetchBestiaryJson(`${baseUrl}data/generated/gendata-maps.json`);
-  } catch {
-    return fetchBestiaryJson('https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/data/generated/gendata-maps.json');
-  }
-}
-
-function flattenMapData(data, baseUrl) {
-  const maps = [];
-  Object.values(data || {}).forEach((source) => {
-    source.chapters?.forEach((chapter) => {
-      const titlesById = new Map();
-      const imagesById = new Map();
-      let lastMapTitle = '';
-      chapter.images?.forEach((image) => {
-        if (image.id) imagesById.set(image.id, image);
-      });
-      chapter.images?.forEach((image, index) => {
-        if (!['map', 'mapPlayer'].includes(image.imageType)) return;
-        const parentImage = image.mapParent?.id ? imagesById.get(image.mapParent.id) : null;
-        const rawTitle = image.title || image.altText || 'Untitled Map';
-        const displayTitle = image.imageType === 'mapPlayer' && rawTitle === 'Player Version'
-          ? `${lastMapTitle || rawTitle} (Player)`
-          : rawTitle;
-        if (image.id) titlesById.set(image.id, displayTitle);
-        if (image.imageType === 'map') lastMapTitle = displayTitle;
-        maps.push({
-          id: `${source.id}-${chapter.ix}-${index}-${image.href?.path || rawTitle}`,
-          displayTitle,
-          sourceName: source.name || source.source || source.id,
-          chapterName: chapter.name || '',
-          imageType: image.imageType,
-          imageUrl: getImageUrl(baseUrl, image.href),
-          width: Number(image.width) || 0,
-          height: Number(image.height) || 0,
-          grid: image.grid || null,
-          mapRegions: image.mapRegions || parentImage?.mapRegions || [],
-          mapRegionWidth: Number(image.mapRegions ? image.width : parentImage?.width) || Number(image.width) || 0,
-          mapRegionHeight: Number(image.mapRegions ? image.height : parentImage?.height) || Number(image.height) || 0,
-          searchText: [
-            displayTitle,
-            rawTitle,
-            source.name,
-            source.source,
-            source.id,
-            chapter.name,
-            image.mapParent?.id ? titlesById.get(image.mapParent.id) : '',
-          ].filter(Boolean).join(' ').toLowerCase(),
-        });
-      });
-    });
-  });
-  return maps.sort((a, b) => Number(b.imageType === 'mapPlayer') - Number(a.imageType === 'mapPlayer'));
-}
-
-function getImageUrl(baseUrl, href = {}) {
-  if (href.type === 'external') return href.url;
-  if (!href.path) return '';
-  return `${normalizeFiveEToolsBaseUrl(baseUrl)}img/${href.path.split('/').map(encodeURIComponent).join('/')}`;
-}
-
-function getMapBoardDimensions(map) {
-  const grid = map.grid || {};
-  const scale = Number(grid.scale) || 1;
-  const gridSize = grid.type === 'square' ? Number(grid.size) || 0 : 0;
-  if (gridSize && map.width && map.height) {
-    return {
-      columns: clampBoardTiles(Math.ceil((map.width / gridSize) * scale)),
-      rows: clampBoardTiles(Math.ceil((map.height / gridSize) * scale)),
-    };
-  }
-  const fallbackColumns = map.width && map.height ? Math.round(Math.sqrt((map.width / map.height) * 600)) : 30;
-  return {
-    columns: clampBoardTiles(fallbackColumns),
-    rows: clampBoardTiles(map.width && map.height ? Math.round(fallbackColumns * (map.height / map.width)) : 20),
-  };
-}
-
-function getMapRegionWalls(map, dimensions) {
-  const regionWidth = map.mapRegionWidth || map.width;
-  const regionHeight = map.mapRegionHeight || map.height;
-  if (!regionWidth || !regionHeight || !map.mapRegions?.length) return [];
-  const walls = [];
-  const seen = new Set();
-
-  map.mapRegions.forEach((region, regionIndex) => {
-    const points = (region.points || [])
-      .map((point) => pointToBoard(point, regionWidth, regionHeight, dimensions))
-      .filter(Boolean);
-
-    if (points.length < 2) return;
-
-    points.forEach((point, index) => {
-      const next = points[(index + 1) % points.length];
-      if (!next || samePoint(point, next)) return;
-      const key = getWallKey(point, next);
-      if (seen.has(key)) return;
-      seen.add(key);
-      walls.push({
-        id: `wall-map-${region.area || regionIndex}-${index}`,
-        start: point,
-        end: next,
-      });
-    });
-  });
-
-  return walls;
-}
-
-function pointToBoard(point, regionWidth, regionHeight, dimensions) {
-  if (!Array.isArray(point) || point.length < 2) return null;
-  return {
-    x: clampWallCoordinate((Number(point[0]) / regionWidth) * dimensions.columns, dimensions.columns),
-    y: clampWallCoordinate((Number(point[1]) / regionHeight) * dimensions.rows, dimensions.rows),
-  };
-}
-
-function clampWallCoordinate(value, max) {
-  return Math.max(-0.5, Math.min(max - 0.5, value - 0.5));
-}
-
-function samePoint(a, b) {
-  return Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01;
-}
-
-function getWallKey(a, b) {
-  const first = serializeWallPoint(a);
-  const second = serializeWallPoint(b);
-  return first < second ? `${first}|${second}` : `${second}|${first}`;
-}
-
-function serializeWallPoint(point) {
-  return `${point.x.toFixed(3)},${point.y.toFixed(3)}`;
-}
-
-function clampBoardTiles(value) {
-  return Math.max(4, Math.min(200, Number(value) || 24));
 }
 
 function monsterTokenSize(monster) {
