@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Copy, Expand, Home, Plus, Redo2, RotateCcw, RotateCw, Search, Settings, Trash2, Undo2, Users } from 'lucide-react';
+import { Copy, Expand, Hand, Home, Keyboard, PanelRightClose, PanelRightOpen, Plus, Redo2, RotateCcw, RotateCw, Settings, Trash2, Undo2, Users } from 'lucide-react';
 import { boardGridLabel } from '../lib/board';
 
 const layerOptions = [
@@ -18,6 +18,10 @@ export function Topbar({
   activeLayer = 'token',
   onLayerChange,
   onBoardSelect,
+  onOpenBoardSettings,
+  onOpenShortcuts,
+  onToggleSidebar,
+  isSidebarCollapsed = false,
   onAddBoard,
   onImportBoard,
   onImportFiveEToolsMap,
@@ -26,7 +30,8 @@ export function Topbar({
   onPublishBoard,
   onProjectHome,
   onFullscreen,
-  onToggleZoom,
+  onToggleNavigation,
+  navigationVisible = true,
   onRotateLeft,
   onRotateRight,
   onUndo,
@@ -52,7 +57,9 @@ export function Topbar({
           className="board-title-button"
           type="button"
           onClick={() => setIsDrawerOpen((open) => !open)}
-          title="Open page drawer"
+          title="Open board drawer"
+          aria-expanded={isDrawerOpen}
+          aria-label={`Boards: ${board.name}`}
         >
           <strong>{board.name}</strong>
           <span>{board.columns} x {board.rows} cells · {boardGridLabel(board)}</span>
@@ -66,6 +73,7 @@ export function Topbar({
                   key={id}
                   type="button"
                   className={activeLayer === id ? 'active' : ''}
+                  aria-pressed={activeLayer === id}
                   onClick={() => onLayerChange?.(id)}
                 >
                   {label}
@@ -77,9 +85,15 @@ export function Topbar({
       </div>
       <div className="top-actions">
         {mode === 'dm' && (
+          <div className="workspace-actions">
+            <button type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={onOpenShortcuts}><Keyboard size={16} /></button>
+            <button type="button" title={`${isSidebarCollapsed ? 'Show' : 'Hide'} sidebar (B)`} aria-label={isSidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!isSidebarCollapsed} onClick={onToggleSidebar}>{isSidebarCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}</button>
+          </div>
+        )}
+        {mode === 'dm' && (
           <div className="history-actions">
-            <button type="button" title="Undo (Ctrl+Z)" aria-label="Undo" onClick={onUndo} disabled={!canUndo}><Undo2 size={16} /></button>
-            <button type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" onClick={onRedo} disabled={!canRedo}><Redo2 size={16} /></button>
+            <button type="button" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo" onClick={onUndo} disabled={!canUndo}><Undo2 size={16} /></button>
+            <button type="button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo" onClick={onRedo} disabled={!canRedo}><Redo2 size={16} /></button>
           </div>
         )}
         {mode === 'dm' && (
@@ -97,7 +111,7 @@ export function Topbar({
           )
         )}
         {mode === 'dm' && <a className="ghost-link" href={playerUrl} target="_blank" rel="noreferrer"><Users size={16} /> Open player view</a>}
-        {mode === 'player' && <button onClick={onToggleZoom}><Search size={16} /> Zoom</button>}
+        {mode === 'player' && <button type="button" title={navigationVisible ? 'Hide board navigation controls' : 'Show board navigation controls'} aria-pressed={navigationVisible} onClick={onToggleNavigation}><Hand size={16} /> Navigation</button>}
         {mode === 'player' && <button title="Rotate board counter clockwise" onClick={onRotateLeft}><RotateCcw size={16} /> Rotate</button>}
         {mode === 'player' && <button title="Rotate board clockwise" onClick={onRotateRight}><RotateCw size={16} /> Rotate</button>}
         {mode === 'player' && <button onClick={onFullscreen}><Expand size={16} /> Full screen</button>}
@@ -146,7 +160,7 @@ export function Topbar({
                   >
                     <Users size={14} />
                   </button>
-                  <button type="button" title="Board settings" onClick={() => onBoardSelect?.(item.id)}><Settings size={14} /></button>
+                  <button type="button" title="Board settings" onClick={() => { onOpenBoardSettings?.(item.id); setIsDrawerOpen(false); }}><Settings size={14} /></button>
                   <button type="button" title="Duplicate board" onClick={() => onDuplicateBoard?.(item.id)}><Copy size={14} /></button>
                   <button type="button" title="Delete board" disabled={boards.length <= 1} onClick={() => onDeleteBoard?.(item)}><Trash2 size={14} /></button>
                 </div>

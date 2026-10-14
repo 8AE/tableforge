@@ -11,6 +11,9 @@ The app is designed to run on one host machine. Projects are stored on that host
 
 - Create standard 5 ft square-grid boards or 50 ft hex-grid boards for large-scale ship and air combat.
 - Configure board cell width, cell height, and cell pixel size.
+- Set each board’s grid color and line thickness, and show or hide the grid independently in DM and player views under **Board Setup → Board Settings → Grid appearance**. Hiding the grid keeps snapping and measurements active.
+- Navigate with a Hand tool, drag gestures, wheel/trackpad scrolling, and pointer-centered zoom; fit the board with one click.
+- Resize or hide the DM sidebar, and open the keyboard shortcut reference from the header.
 - Upload a board background image and adjust its scale and opacity.
 - Keep a board background image fitted to the full board size as tile dimensions change.
 - Move the board background image on its own background layer.
@@ -18,6 +21,7 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Create, rename, delete, and open projects that contain saved boards. Project names must be unique.
 - Create multiple saved boards and publish the active board to the player viewer.
 - Place and move tokens on the active board grid, including standard 5 ft tokens and dedicated 50 ft hex tokens. Clicking with the token tool asks whether to create a new token or place one from the library on that cell.
+- Drag tokens smoothly by their center under the cursor, then snap to the nearest valid cell on release. Off-center clicks select without moving; Escape cancels a drag.
 - Edit selected tokens, including color and uploaded token artwork.
 - Open a project-wide searchable token library with quick stats (CR, AC, HP, size, vision, source) for each saved token, edit tokens in a dedicated popup, and import them onto any board in the project.
 - Search monsters from the 5e.tools bestiary (including custom locally hosted base URLs) or the public Open 5e API, review their stats, and save them into the project token library.
@@ -88,10 +92,27 @@ npm run preview
 - DM-layer tokens are visible in the DM portal but hidden from the player viewer.
 - DM-layer drawings can be prepared privately and later moved to the player layer or revealed.
 - Player-layer drawings and tokens are visible in the player viewer when not hidden.
-- The player viewer includes fullscreen and zoom controls. In fullscreen, its top bar hides until the pointer moves to the top of the screen.
-- Large player boards can be panned by dragging the board.
+- The player viewer uses the same scroll, drag-to-pan, modifier-scroll zoom, and zoom/fit toolbar as the DM board, with zoom up to 1000%. Use **Navigation** in its header to show or hide the toolbar.
+- Player boards start fitted to the viewport. **Fit** / **0** keeps them fitted when the screen or rotation changes; manual zoom preserves the chosen scale. With the board focused, **+ / −** zoom.
+- In fullscreen, the player header hides until the pointer reaches the top of the screen or a header control receives keyboard focus. Navigation remains available.
+- Player door actions use a stationary primary click or tap; dragging across a door pans the board. Right-click opens navigation actions only.
+
+## Board Navigation
+
+- Choose **Select (V)** to move objects and drag a selection box; use **Hand (H)** to drag the board.
+- Hold **Space** and drag, or drag with the middle or right mouse button, to pan with any tool. In the lighting reveal tool, right-drag continues to hide an area.
+- Scroll or use two-finger trackpad gestures to pan; **Shift+scroll** pans horizontally.
+- Hold **Alt**, **Ctrl**, or **Cmd** while scrolling to zoom at the pointer.
+- Use the bottom-right controls to zoom, reset to 100%, or fit the board. With the board focused, **+ / −** zoom and **0** fits.
+- Right-click an object for grouped selection actions, or empty board space for navigation. Menus support arrow keys and Escape.
+- Press **B** to hide or show the sidebar. Its resize handle also accepts Left/Right arrow keys and Home to restore the default width.
+- Click the header keyboard icon or press **?** to open the shortcut reference. Shortcuts do not edit the board while typing or using a dialog.
 
 ## Keyboard Shortcuts
+
+- Select / Hand / Token / Draw / Measure / Lighting: `V` / `H` / `T` / `D` / `M` / `L`
+- Move selected objects: arrow keys
+- Duplicate selection: `Cmd+D` / `Ctrl+D`
 
 - Copy selected token or drawing: `Cmd+C` / `Ctrl+C`
 - Paste copied token or drawing: `Cmd+V` / `Ctrl+V`

@@ -7,6 +7,12 @@ export const gridModes = {
   [GRID_SQUARE_5FT]: { label: '5 ft square grid', feetPerCell: 5, shape: 'square' },
   [GRID_HEX_50FT]: { label: '50 ft hex grid', feetPerCell: 50, shape: 'hex', orientation: 'pointy-top' },
 };
+export const defaultGridAppearance = {
+  visibleToDm: true,
+  visibleToPlayers: true,
+  color: '#f5f3ed',
+  thickness: 1,
+};
 export const defaultLighting = {
   enabled: false,
   darkness: 1,
@@ -224,12 +230,24 @@ export function tokenFootprint(token = {}) {
 }
 
 export function normalizeGrid(grid = {}) {
-  const mode = gridModes[grid.mode] ? grid.mode : GRID_SQUARE_5FT;
+  const input = grid && typeof grid === 'object' ? grid : {};
+  const mode = Object.hasOwn(gridModes, input.mode) ? input.mode : GRID_SQUARE_5FT;
+  const color = typeof input.color === 'string' ? input.color.trim() : '';
+  const validColor = /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(color);
+  const numericThickness = (typeof input.thickness === 'number' || (typeof input.thickness === 'string' && input.thickness.trim() !== ''))
+    ? Number(input.thickness)
+    : NaN;
   return {
     mode,
     shape: gridModes[mode].shape,
     feetPerCell: gridModes[mode].feetPerCell,
     orientation: gridModes[mode].orientation || 'orthogonal',
+    visibleToDm: typeof input.visibleToDm === 'boolean' ? input.visibleToDm : defaultGridAppearance.visibleToDm,
+    visibleToPlayers: typeof input.visibleToPlayers === 'boolean' ? input.visibleToPlayers : defaultGridAppearance.visibleToPlayers,
+    color: validColor
+      ? (color.length === 4 ? `#${[...color.slice(1)].map((digit) => digit.repeat(2)).join('')}` : color).toLowerCase()
+      : defaultGridAppearance.color,
+    thickness: Number.isFinite(numericThickness) ? Math.min(4, Math.max(0.5, numericThickness)) : defaultGridAppearance.thickness,
   };
 }
 

@@ -5,37 +5,15 @@ import { getBoard, updateActiveBoard } from '../lib/board';
 
 export function PlayerViewer({ state, projectId, updateProjectState }) {
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
-  const [showZoom, setShowZoom] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const [showNavigation, setShowNavigation] = useState(true);
   const [rotation, setRotation] = useState(0);
   const enterFullscreen = () => document.documentElement.requestFullscreen?.();
   const rotateBoard = (degrees) => setRotation((current) => (current + degrees + 360) % 360);
-  const clampZoom = (value) => Math.max(0.4, Math.min(10, value));
 
   useEffect(() => {
     const onFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onFullscreen);
     return () => document.removeEventListener('fullscreenchange', onFullscreen);
-  }, []);
-
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (['input', 'select', 'textarea'].includes(event.target?.tagName?.toLowerCase())) return;
-      if (event.key === '+' || event.key === '=') {
-        event.preventDefault();
-        setZoom((current) => clampZoom(current + 0.1));
-      }
-      if (event.key === '-' || event.key === '_') {
-        event.preventDefault();
-        setZoom((current) => clampZoom(current - 0.1));
-      }
-      if (event.key === '0') {
-        event.preventDefault();
-        setZoom(1);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   if (!state) {
@@ -71,17 +49,14 @@ export function PlayerViewer({ state, projectId, updateProjectState }) {
         board={board}
         mode="player"
         onFullscreen={enterFullscreen}
-        onToggleZoom={() => setShowZoom((shown) => !shown)}
+        onToggleNavigation={() => setShowNavigation((shown) => !shown)}
+        navigationVisible={showNavigation}
         onRotateLeft={() => rotateBoard(-90)}
         onRotateRight={() => rotateBoard(90)}
       />
-      {showZoom && (
-        <div className="zoom-popover">
-          <input type="range" min="0.4" max="10" step="0.1" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} />
-          <span>{Math.round(zoom * 100)}%</span>
-        </div>
-      )}
-      <BoardCanvas board={board} view="player" tool="viewer" fitToViewport playerZoom={zoom} playerRotation={rotation} onToggleDoor={toggleDoor} />
+      <div className="map-viewport">
+        <BoardCanvas board={board} view="player" tool="viewer" fitToViewport showNavigation={showNavigation} playerRotation={rotation} onToggleDoor={toggleDoor} />
+      </div>
     </section>
   );
 }

@@ -1,4 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Minus, Plus, Scan } from 'lucide-react';
+import { getTokenDragPlacement } from '../lib/tokenDrag';
 import {
   boardPixelSize,
   cellCenterPixels,
@@ -10,6 +13,7 @@ import {
   isPointNearWall,
   isHexBoard,
   normalizeBackground,
+  normalizeGrid,
   offsetEntity,
   offsetDrawing,
   revealBox,
@@ -55,9 +59,10 @@ export function BoardCanvas({
   onDeleteSelection,
   onDuplicateSelection,
   onChangeSelectionLayer,
+  onToolChange,
   fitToViewport = false,
-  playerZoom = 1,
   playerRotation = 0,
+  showNavigation = true,
 }) {
   const [drag, setDrag] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
@@ -65,18 +70,33 @@ export function BoardCanvas({
   const [lockedDoorAlert, setLockedDoorAlert] = useState(null);
   const shellRef = useRef(null);
   const backgroundVideoRef = useRef(null);
-  const [fitScale, setFitScale] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [dmZoom, setDmZoom] = useState(1);
+  const boardRef = useRef(null);
+  const menuRef = useRef(null);
+  const panGestureRef = useRef(null);
+  const suppressContextMenuRef = useRef(false);
+  const dragRef = useRef(null);
+  const renderedZoomRef = useRef(1);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  dragRef.current = drag;
+  const [zoom, setZoom] = useState(1);
+  const [autoFit, setAutoFit] = useState(fitToViewport);
   const zoomAnchorRef = useRef(null);
   const tile = board.tileSize;
   const boardSize = boardPixelSize(board);
   const width = boardSize.width;
   const height = boardSize.height;
+  const minimumZoom = Math.min(0.1, 64 / Math.max(width, height, 1));
+  const maximumZoom = view === 'dm' ? 3 : 10;
   const hexBoard = isHexBoard(board);
-  const scale = fitScale * (view === 'dm' ? dmZoom : playerZoom);
+  const grid = normalizeGrid(board.grid);
+  const gridVisible = view === 'dm' ? grid.visibleToDm : grid.visibleToPlayers;
+  const gridRgb = [1, 3, 5].map((offset) => parseInt(grid.color.slice(offset, offset + 2), 16)).join(', ');
+  const scale = zoom;
   const normalizedRotation = ((playerRotation % 360) + 360) % 360;
   const isRotatedSideways = normalizedRotation === 90 || normalizedRotation === 270;
+  const rotatedWidth = isRotatedSideways ? height : width;
+  const rotatedHeight = isRotatedSideways ? width : height;
   const stageWidth = (isRotatedSideways ? height : width) * scale;
   const stageHeight = (isRotatedSideways ? width : height) * scale;
   const rotationOffset = getRotationOffset(normalizedRotation, width, height, scale);
@@ -153,72 +173,179 @@ export function BoardCanvas({
     return dmTokens.filter((token) => tokenHasVision(token) || tokenIsInRevealedLight(token, lighting, allDimPolygons, board));
   }, [allDimPolygons, dmTokens, lighting, tile, view]);
 
-  useEffect(() => {
-    if (!fitToViewport || !shellRef.current) {
-      setFitScale(1);
-      return undefined;
-    }
+  const zoomAt = (value, clientPoint) => {
     const shell = shellRef.current;
-    const resize = () => {
-      const rect = shell.getBoundingClientRect();
-      const nextScale = Math.min(rect.width / width, rect.height / height, 1);
-      setFitScale(Math.max(0.2, nextScale));
+    if (!shell) return;
+    const rect = shell.getBoundingClientRect();
+    const padding = window.getComputedStyle(shell);
+    zoomAnchorRef.current = {
+      x: (clientPoint?.x ?? rect.left + shell.clientWidth / 2) - rect.left - parseFloat(padding.paddingLeft || 0),
+      y: (clientPoint?.y ?? rect.top + shell.clientHeight / 2) - rect.top - parseFloat(padding.paddingTop || 0),
     };
-    resize();
-    const observer = new ResizeObserver(resize);
+    setAutoFit(false);
+    setZoom((current) => Math.max(minimumZoom, Math.min(maximumZoom, typeof value === 'function' ? value(current) : value)));
+  };
+
+  const applyFit = () => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const padding = window.getComputedStyle(shell);
+    const availableWidth = shell.clientWidth - parseFloat(padding.paddingLeft || 0) - parseFloat(padding.paddingRight || 0);
+    const availableHeight = shell.clientHeight - parseFloat(padding.paddingTop || 0) - parseFloat(padding.paddingBottom || 0);
+    zoomAnchorRef.current = null;
+    setZoom(Math.max(minimumZoom, Math.min(1, availableWidth / rotatedWidth, availableHeight / rotatedHeight)));
+    shell.scrollLeft = 0;
+    shell.scrollTop = 0;
+  };
+
+  const fitBoard = () => {
+    setAutoFit(true);
+    applyFit();
+  };
+
+  useLayoutEffect(() => {
+    if (!autoFit || !shellRef.current) return undefined;
+    const shell = shellRef.current;
+    applyFit();
+    const observer = new ResizeObserver(applyFit);
     observer.observe(shell);
-    window.addEventListener('resize', resize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', resize);
-    };
-  }, [fitToViewport, width, height]);
+    return () => observer.disconnect();
+  }, [autoFit, rotatedWidth, rotatedHeight, normalizedRotation, minimumZoom, board.id, view]);
 
   useEffect(() => {
-    if (view !== 'dm' || !shellRef.current) return undefined;
+    if (!shellRef.current) return undefined;
     const shell = shellRef.current;
     const onWheel = (event) => {
+      if (contextMenu || tokenPrompt || document.querySelector('[aria-modal="true"], dialog[open]')) return;
       event.preventDefault();
-      setDmZoom((current) => {
-        const next = Math.max(0.25, Math.min(3, current * Math.exp(-event.deltaY * 0.0015)));
-        if (next !== current) {
-          const rect = shell.getBoundingClientRect();
-          zoomAnchorRef.current = {
-            x: event.clientX - rect.left,
-            y: event.clientY - rect.top,
-            ratio: next / current,
-          };
-        }
-        return next;
-      });
+      if (event.altKey || event.ctrlKey || event.metaKey) {
+        const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? shell.clientHeight : 1);
+        zoomAt((current) => current * Math.exp(-delta * 0.002), { x: event.clientX, y: event.clientY });
+      } else {
+        const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? shell.clientHeight : 1;
+        shell.scrollLeft += (event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX) * unit;
+        shell.scrollTop += (event.shiftKey ? 0 : event.deltaY) * unit;
+      }
     };
     shell.addEventListener('wheel', onWheel, { passive: false });
     return () => shell.removeEventListener('wheel', onWheel);
-  }, [view]);
+  }, [view, contextMenu, tokenPrompt, minimumZoom, maximumZoom]);
 
   useLayoutEffect(() => {
     const shell = shellRef.current;
     const anchor = zoomAnchorRef.current;
+    const ratio = zoom / renderedZoomRef.current;
+    renderedZoomRef.current = zoom;
     if (!shell || !anchor) return;
     zoomAnchorRef.current = null;
-    shell.scrollLeft = (shell.scrollLeft + anchor.x) * anchor.ratio - anchor.x;
-    shell.scrollTop = (shell.scrollTop + anchor.y) * anchor.ratio - anchor.y;
-  }, [dmZoom]);
+    shell.scrollLeft = (shell.scrollLeft + anchor.x) * ratio - anchor.x;
+    shell.scrollTop = (shell.scrollTop + anchor.y) * ratio - anchor.y;
+  }, [zoom]);
+
+  useLayoutEffect(() => {
+    setAutoFit(fitToViewport);
+    if (fitToViewport) applyFit();
+    else setZoom(1);
+    setDrag(null);
+    setContextMenu(null);
+    setTokenPrompt(null);
+    setSpaceHeld(false);
+    setIsPanning(false);
+    panGestureRef.current = null;
+    suppressContextMenuRef.current = false;
+    zoomAnchorRef.current = null;
+    if (shellRef.current) {
+      shellRef.current.scrollLeft = 0;
+      shellRef.current.scrollTop = 0;
+    }
+  }, [board.id, view, fitToViewport]);
+
+  const cancelInteraction = () => {
+    if (dragRef.current?.type === 'ruler') onLiveMeasurement?.(null);
+    dragRef.current = null;
+    setDrag(null);
+    setIsPanning(false);
+    const gesture = panGestureRef.current;
+    panGestureRef.current = null;
+    if (gesture && shellRef.current?.hasPointerCapture(gesture.pointerId)) {
+      shellRef.current.releasePointerCapture(gesture.pointerId);
+    }
+  };
 
   useEffect(() => {
-    if (!drag && !contextMenu && !tokenPrompt) return undefined;
+    const onKeyUp = (event) => {
+      if (event.code === 'Space') setSpaceHeld(false);
+    };
+    const onBlur = () => {
+      setSpaceHeld(false);
+      cancelInteraction();
+    };
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [onLiveMeasurement]);
+
+  const onViewportKeyDown = (event) => {
+    if (isEditableTarget(event.target) || event.target.closest('[role="menu"], [role="dialog"]') || document.querySelector('[aria-modal="true"], dialog[open]')) return;
+    if (event.code === 'Space' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      setSpaceHeld(true);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey || contextMenu || tokenPrompt) return;
+    if (event.key === '+' || event.key === '=') {
+      event.preventDefault();
+      zoomAt((current) => current * 1.2);
+    } else if (event.key === '-' || event.key === '_') {
+      event.preventDefault();
+      zoomAt((current) => current / 1.2);
+    } else if (event.key === '0') {
+      event.preventDefault();
+      fitBoard();
+    }
+  };
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!contextMenu || !menu) return;
+    const rect = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(contextMenu.x, window.innerWidth - rect.width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(contextMenu.y, window.innerHeight - rect.height - 8))}px`;
+    menu.querySelector('button')?.focus();
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const dismiss = (event) => {
+      if (!menuRef.current?.contains(event.target)) setContextMenu(null);
+    };
+    const close = () => setContextMenu(null);
+    window.addEventListener('pointerdown', dismiss, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('pointerdown', dismiss, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!drag && !contextMenu && !tokenPrompt && !isPanning) return undefined;
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return;
+      if (document.querySelector('[aria-modal="true"], dialog[open]')) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (drag?.type === 'ruler') onLiveMeasurement?.(null);
-      setDrag(null);
+      cancelInteraction();
       setContextMenu(null);
       setTokenPrompt(null);
+      shellRef.current?.focus({ preventScroll: true });
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [drag, contextMenu, tokenPrompt, onLiveMeasurement]);
+  }, [drag, contextMenu, tokenPrompt, isPanning, onLiveMeasurement]);
 
   useEffect(() => {
     if (background.type !== 'video' || !background.src) return undefined;
@@ -266,15 +393,21 @@ export function BoardCanvas({
     };
   }, [background.src, background.type]);
 
-  const pointFromEvent = (event) => {
-    const rect = event.currentTarget.getBoundingClientRect();
+  const pointFromEvent = (event, element = event.currentTarget) => {
+    const rect = element.getBoundingClientRect();
     const hexMetrics = hexBoard ? hexCellMetrics(board) : null;
     const unitWidth = hexMetrics?.width || tile;
+    const screenX = (event.clientX - rect.left) / scale;
+    const screenY = (event.clientY - rect.top) / scale;
+    const local = normalizedRotation === 90 ? { x: screenY, y: height - screenX }
+      : normalizedRotation === 180 ? { x: width - screenX, y: height - screenY }
+        : normalizedRotation === 270 ? { x: width - screenY, y: screenX }
+          : { x: screenX, y: screenY };
     return {
-      x: (event.clientX - rect.left) / (unitWidth * scale),
-      y: (event.clientY - rect.top) / (tile * scale),
-      px: (event.clientX - rect.left) / scale,
-      py: (event.clientY - rect.top) / scale,
+      x: local.x / unitWidth,
+      y: local.y / tile,
+      px: local.x,
+      py: local.y,
     };
   };
 
@@ -300,21 +433,13 @@ export function BoardCanvas({
   const drawingAt = (point) => [...activeCanvasDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing));
   const crossLayerDrawingAt = (point) => ['token', 'gm'].includes(activeLayer) ? [...visibleDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing)) : null;
   const wallAt = (point) => activeLayer === 'walls' ? [...lighting.walls].reverse().find((wall) => isPointNearWall(point, wall)) : null;
-  const doorAt = (point) => activeLayer === 'walls' ? [...visibleDoors].reverse().find((door) => Math.hypot(point.x - door.position.x, point.y - door.position.y) <= 0.45) : null;
+  const doorAt = (point) => view === 'player' || activeLayer === 'walls' ? [...visibleDoors].reverse().find((door) => Math.hypot(point.px - door.position.x * tile, point.py - door.position.y * tile) <= tile * 0.45) : null;
   const isSelected = (type, id) => selectedItems.some((item) => item.type === type && item.id === id);
 
   const onPointerDown = (event) => {
     if (view !== 'dm') return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    if (event.button === 1) {
-      event.preventDefault();
-      setDrag({
-        type: 'pan-scroll',
-        start: { x: event.clientX, y: event.clientY },
-        original: { left: shellRef.current?.scrollLeft || 0, top: shellRef.current?.scrollTop || 0 },
-      });
-      return;
-    }
+    if (event.button !== 0 && !(tool === 'light' && event.button === 2)) return;
     const point = pointFromEvent(event);
     const snapped = snapToTile(point, board);
     const wallPoint = lighting.snapWallsToGrid ? snapped : clampPoint(point, board);
@@ -369,14 +494,18 @@ export function BoardCanvas({
       }
       const isGroupDrag = isSelected('token', token.id) && selected?.type === 'multi';
       if (!isGroupDrag) setSelected({ type: 'token', id: token.id });
-      setDrag({
+      const nextDrag = {
         type: 'token',
         id: token.id,
-        offset: { x: point.x - token.x, y: point.y - token.y },
+        token: structuredClone(token),
+        startClient: { x: event.clientX, y: event.clientY },
         original: { x: token.x, y: token.y },
-        preview: { x: token.x, y: token.y },
+        moved: false,
+        placement: null,
         group: isGroupDrag ? selected.items : null,
-      });
+      };
+      dragRef.current = nextDrag;
+      setDrag(nextDrag);
       return;
     }
 
@@ -459,20 +588,6 @@ export function BoardCanvas({
       return;
     }
 
-    if (drag.type === 'pan') {
-      setPan({ x: drag.original.x + event.clientX - drag.start.x, y: drag.original.y + event.clientY - drag.start.y });
-      return;
-    }
-
-    if (drag.type === 'pan-scroll') {
-      const shell = shellRef.current;
-      if (shell) {
-        shell.scrollLeft = drag.original.left - (event.clientX - drag.start.x);
-        shell.scrollTop = drag.original.top - (event.clientY - drag.start.y);
-      }
-      return;
-    }
-
     if (drag.type === 'vehicle-image') {
       const dx = point.px - drag.start.x;
       const dy = point.py - drag.start.y;
@@ -485,20 +600,13 @@ export function BoardCanvas({
     }
 
     if (drag.type === 'token') {
-      const draggedToken = activeCanvasTokens.find((token) => token.id === drag.id);
-      const footprint = tokenFootprint(draggedToken);
-      const preview = hexBoard && draggedToken?.tokenKind === 'hex50'
-        ? snapped
-        : {
-            x: Math.max(0, Math.min(board.columns - footprint.width, Math.floor(point.x - drag.offset.x))),
-            y: Math.max(0, Math.min(board.rows - footprint.height, Math.floor(point.y - drag.offset.y))),
-          };
-      setDrag({
-        ...drag,
-        preview,
-        dx: preview.x - drag.original.x,
-        dy: preview.y - drag.original.y,
-      });
+      const current = dragRef.current;
+      if (current?.type !== 'token') return;
+      if (!current.moved && Math.hypot(event.clientX - current.startClient.x, event.clientY - current.startClient.y) < 4) return;
+      const placement = getTokenDragPlacement(current.token, board, point);
+      const nextDrag = { ...current, moved: true, placement };
+      dragRef.current = nextDrag;
+      setDrag(nextDrag);
       return;
     }
 
@@ -552,51 +660,108 @@ export function BoardCanvas({
     if (drag.type === 'ruler') onLiveMeasurement?.({ start: drag.start, end: snapped });
   };
 
+  const onViewportPointerDown = (event) => {
+    if (event.target.closest('.context-menu')) return;
+    shellRef.current?.focus({ preventScroll: true });
+    suppressContextMenuRef.current = false;
+    const isPan = event.button === 1 || (event.button === 2 && (spaceHeld || view === 'player' || tool !== 'light')) || (event.button === 0 && (view === 'player' || tool === 'pan' || spaceHeld));
+    if (!isPan) return;
+    event.preventDefault();
+    event.stopPropagation();
+    cancelInteraction();
+    setContextMenu(null);
+    setTokenPrompt(null);
+    const shell = shellRef.current;
+    const point = view === 'player' && event.button === 0 && !spaceHeld && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      ? pointFromEvent(event, boardRef.current) : null;
+    shell.setPointerCapture(event.pointerId);
+    panGestureRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: shell.scrollLeft,
+      top: shell.scrollTop,
+      moved: false,
+      door: point ? doorAt(point) : null,
+      point,
+    };
+    setIsPanning(true);
+  };
+
+  const onViewportPointerMove = (event) => {
+    const gesture = panGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dx = event.clientX - gesture.startX;
+    const dy = event.clientY - gesture.startY;
+    if (!gesture.moved && Math.hypot(dx, dy) < 4) return;
+    gesture.moved = true;
+    suppressContextMenuRef.current = true;
+    setContextMenu(null);
+    shellRef.current.scrollLeft = gesture.left - dx;
+    shellRef.current.scrollTop = gesture.top - dy;
+  };
+
+  const onViewportPointerUp = (event) => {
+    const gesture = panGestureRef.current;
+    if (gesture?.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+    const stationary = !gesture.moved && Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) < 4;
+    if (stationary && gesture.door) {
+      if (gesture.door.state === 'locked' || gesture.door.isLocked) {
+        const id = gesture.door.id;
+        setLockedDoorAlert({ x: gesture.point.px, y: gesture.point.py, id });
+        window.setTimeout(() => setLockedDoorAlert((alert) => alert?.id === id ? null : alert), 1200);
+      } else onToggleDoor?.(gesture.door.id);
+    }
+    cancelInteraction();
+  };
+
   const onBoardPointerDown = (event) => {
     setContextMenu(null);
     setTokenPrompt(null);
-    if (view === 'player') {
-      const point = pointFromEvent(event);
-      const door = doorAt(point);
-      if (door) {
-        if (door.state === 'locked' || door.isLocked) {
-          setLockedDoorAlert({ x: point.px, y: point.py, id: door.id });
-          window.setTimeout(() => setLockedDoorAlert((alert) => alert?.id === door.id ? null : alert), 1200);
-          return;
-        }
-        onToggleDoor?.(door.id);
-        return;
-      }
-      event.currentTarget.setPointerCapture(event.pointerId);
-      setDrag({ type: 'pan', start: { x: event.clientX, y: event.clientY }, original: pan });
-      return;
-    }
+    if (view === 'player') return;
     onPointerDown(event);
   };
 
   const onContextMenu = (event) => {
-    if (view !== 'dm') return;
     event.preventDefault();
-    if (tool === 'light') return;
-    const point = pointFromEvent(event);
+    if ((view === 'dm' && tool === 'light') || suppressContextMenuRef.current) return;
+    if (view === 'player') {
+      setContextMenu({ x: event.clientX, y: event.clientY, target: null });
+      return;
+    }
+    const point = pointFromEvent(event, boardRef.current);
     const token = tokenAt(point) || crossLayerTokenAt(point);
     const drawing = drawingAt(point) || crossLayerDrawingAt(point);
     const wall = wallAt(point);
     const door = doorAt(point);
-    if (!token && !drawing && !door && !wall) return;
-    const clicked = token ? { type: 'token', id: token.id } : drawing ? { type: 'drawing', id: drawing.id } : door ? { type: 'door', id: door.id } : { type: 'wall', id: wall.id };
-    const partOfSelection = isSelected(clicked.type, clicked.id);
+    const clicked = token ? { type: 'token', id: token.id } : drawing ? { type: 'drawing', id: drawing.id } : door ? { type: 'door', id: door.id } : wall ? { type: 'wall', id: wall.id } : null;
+    const partOfSelection = clicked && isSelected(clicked.type, clicked.id);
     const target = partOfSelection && selected?.type === 'multi' ? selected : clicked;
-    if (!partOfSelection) setSelected(clicked);
-    setContextMenu({ x: point.px, y: point.py, target });
+    if (clicked && !partOfSelection) setSelected(clicked);
+    setContextMenu({ x: event.clientX, y: event.clientY, target });
   };
 
-  const onPointerUp = () => {
-    if (!drag) return;
-    if (drag.type === 'token') {
-      if (drag.group?.length && (drag.dx || drag.dy)) onMoveSelection(drag.group, drag.dx, drag.dy);
-      else onMoveToken(drag.id, drag.preview);
+  const onPointerUp = (event) => {
+    const current = dragRef.current;
+    if (current?.type === 'token') {
+      const moved = current.moved || Math.hypot(event.clientX - current.startClient.x, event.clientY - current.startClient.y) >= 4;
+      if (moved) {
+        const { drop } = getTokenDragPlacement(current.token, board, pointFromEvent(event, boardRef.current));
+        const dx = drop.x - current.original.x;
+        const dy = drop.y - current.original.y;
+        if (dx || dy) {
+          if (current.group?.length) onMoveSelection(current.group, dx, dy);
+          else onMoveToken(current.id, { x: drop.x, y: drop.y });
+        }
+      }
+      dragRef.current = null;
+      setDrag(null);
+      return;
     }
+    if (!drag) return;
     if (drag.type === 'drawing' && (drag.dx || drag.dy)) {
       if (drag.group?.length) onMoveSelection(drag.group, drag.dx, drag.dy);
       else onMoveDrawing(drag.id, drag.dx, drag.dy);
@@ -681,25 +846,30 @@ export function BoardCanvas({
     : [];
   const liveShape = drag && ['square', 'circle', 'cone', 'shape', 'ruler', 'light', 'light-hide', 'wall'].includes(drag.type) ? drag : null;
   const displayTokens = visibleTokens.map((token) => (
-    isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'token' && item.id === token.id)
+    drag?.type === 'token' ? token : isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'token' && item.id === token.id)
       ? { ...token, x: token.x + (drag.dx || 0), y: token.y + (drag.dy || 0) }
-      : drag?.type === 'token' && drag.id === token.id ? { ...token, ...drag.preview } : token
+      : token
   ));
   const displayDrawings = visibleDrawings.map((drawing) => (
-    isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'drawing' && item.id === drawing.id)
+    drag?.type === 'token' ? drawing : isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'drawing' && item.id === drawing.id)
       ? { ...drawing, ...offsetDrawing(drawing, drag.dx || 0, drag.dy || 0) }
       : drag?.type === 'drawing' && drag.id === drawing.id ? { ...drawing, ...offsetDrawing(drawing, drag.dx, drag.dy) } : drawing
   ));
   const displayWalls = lighting.walls.map((wall) => (
-    isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'wall' && item.id === wall.id)
+    drag?.type === 'token' ? wall : isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'wall' && item.id === wall.id)
       ? offsetEntity(wall, 'wall', drag.dx || 0, drag.dy || 0)
       : drag?.type === 'wall-move' && drag.id === wall.id ? drag.preview : wall
   ));
   const displayDoors = visibleDoors.map((door) => (
-    isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'door' && item.id === door.id)
+    drag?.type === 'token' ? door : isGroupEntityDrag(drag) && drag.group?.some((item) => item.type === 'door' && item.id === door.id)
       ? offsetEntity(door, 'door', drag.dx || 0, drag.dy || 0)
       : drag?.type === 'door' && drag.id === door.id ? drag.preview : door
   ));
+  const tokenDragDelta = drag?.type === 'token' && drag.moved ? drag.placement?.pixelDelta : null;
+  const followsTokenDrag = (type, id) => Boolean(tokenDragDelta && ((type === 'token' && drag.id === id) || drag.group?.some((item) => item.type === type && item.id === id)));
+  const renderDraggedGroupItem = (type, item, rendered) => followsTokenDrag(type, item.id)
+    ? <g key={item.id} transform={`translate(${tokenDragDelta.x} ${tokenDragDelta.y})`}>{rendered}</g>
+    : rendered;
   const boardObjectMotion = useBoardObjectMotion(view === 'player', {
     tokens: displayTokens,
     drawings: displayDrawings,
@@ -709,26 +879,48 @@ export function BoardCanvas({
 
   return (
     <>
-    {view === 'dm' && Math.abs(dmZoom - 1) > 0.01 && (
-      <button type="button" className="dm-zoom-indicator" title="Reset zoom to 100%" onClick={() => setDmZoom(1)}>
-        {Math.round(dmZoom * 100)}% · Reset
-      </button>
+    {showNavigation && (
+      <div className="board-viewport-controls" role="group" aria-label="Board navigation">
+        <span className="board-viewport-hint">{view === 'player' ? 'Drag to pan · Alt + scroll to zoom' : 'Space + drag to pan · Alt + scroll to zoom'}</span>
+        <button type="button" aria-label="Zoom out" title="Zoom out (−)" disabled={zoom <= minimumZoom} onClick={() => zoomAt((current) => current / 1.2)}><Minus size={16} aria-hidden="true" /></button>
+        <button type="button" aria-label={`Zoom ${Math.round(zoom * 100)} percent. Reset to 100 percent`} title="Reset zoom to 100%" onClick={() => zoomAt(1)}>{Math.round(zoom * 100)}%</button>
+        <button type="button" aria-label="Zoom in" title="Zoom in (+)" disabled={zoom >= maximumZoom} onClick={() => zoomAt((current) => current * 1.2)}><Plus size={16} aria-hidden="true" /></button>
+        <button type="button" aria-label="Fit board to viewport" title="Fit board (0)" onClick={fitBoard}><Scan size={16} aria-hidden="true" /></button>
+      </div>
     )}
-    <div className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''}`} ref={shellRef}>
+    <div
+      className={`board-shell ${fitToViewport ? 'board-shell-fit' : ''} ${view === 'player' || tool === 'pan' || spaceHeld ? 'is-pan-ready' : ''} ${isPanning ? 'is-panning' : ''}`}
+      ref={shellRef}
+      tabIndex={0}
+      role="region"
+      aria-label={view === 'dm' ? 'Interactive game board. Space and drag to pan; plus and minus to zoom; 0 to fit.' : 'Player game board. Drag to pan; plus and minus to zoom; 0 to fit.'}
+      onKeyDown={onViewportKeyDown}
+      onPointerDownCapture={onViewportPointerDown}
+      onPointerMoveCapture={onViewportPointerMove}
+      onPointerUpCapture={onViewportPointerUp}
+      onPointerCancel={cancelInteraction}
+      onLostPointerCapture={cancelInteraction}
+      onContextMenu={onContextMenu}
+    >
       <div className="board-stage" style={{ width: stageWidth, height: stageHeight }}>
         <div
-          className={`board active-layer-${activeLayer} ${hexBoard ? 'board-hex-grid' : ''} ${fitToViewport ? 'board-fit' : ''}`}
+          ref={boardRef}
+          className={`board active-layer-${activeLayer} ${hexBoard ? 'board-hex-grid' : ''} ${gridVisible ? '' : 'board-grid-hidden'} ${fitToViewport ? 'board-fit' : ''}`}
           style={{
             width,
             height,
             '--tile': `${tile}px`,
-            transform: `translate(${pan.x}px, ${pan.y}px) translate(${rotationOffset.x}px, ${rotationOffset.y}px) rotate(${normalizedRotation}deg) scale(${scale})`,
+            '--grid-color': grid.color,
+            '--grid-base-color': `rgba(${gridRgb}, 0.18)`,
+            '--grid-line-color': `rgba(${gridRgb}, 0.2)`,
+            '--grid-hex-color': `rgba(${gridRgb}, 0.28)`,
+            '--grid-thickness': `${grid.thickness}px`,
+            transform: `translate(${rotationOffset.x}px, ${rotationOffset.y}px) rotate(${normalizedRotation}deg) scale(${scale})`,
           }}
           onPointerDown={onBoardPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={() => setDrag(null)}
-          onContextMenu={onContextMenu}
+          onPointerCancel={cancelInteraction}
         >
           {background.src && (
             background.type === 'video' ? (
@@ -805,12 +997,12 @@ export function BoardCanvas({
                 {allBrightPolygons.map((token) => <polygon key={`bright-${token.id}`} points={token.points} fill="black" />)}
               </mask>
             </defs>
-            {renderBoardGrid(board)}
-            {displayDrawings.map((drawing) => renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id), boardObjectMotion.drawings[drawing.id]))}
+            {gridVisible && renderBoardGrid(board)}
+            {displayDrawings.map((drawing) => renderDraggedGroupItem('drawing', drawing, renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id), boardObjectMotion.drawings[drawing.id])))}
             {boardObjectMotion.exiting.drawings.map((drawing) => renderDrawing(drawing, tile, board, null, false, { className: 'player-object-exit player-svg-motion' }, `exiting-drawing-${drawing.id}`))}
             {liveDrawing.map((drawing) => renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id)))}
-            {view === 'dm' && displayWalls.map((wall) => renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id)))}
-            {displayDoors.map((door) => renderDoor(door, tile, view, isSelected('door', door.id), boardObjectMotion.doors[door.id]))}
+            {view === 'dm' && displayWalls.map((wall) => renderDraggedGroupItem('wall', wall, renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id))))}
+            {displayDoors.map((door) => renderDraggedGroupItem('door', door, renderDoor(door, tile, view, isSelected('door', door.id), boardObjectMotion.doors[door.id])))}
             {boardObjectMotion.exiting.doors.map((door) => renderDoor(door, tile, view, false, { className: 'player-object-exit player-door-motion' }, `exiting-door-${door.id}`))}
             {liveMarquee && (
               <rect
@@ -854,7 +1046,11 @@ export function BoardCanvas({
               ? { className: 'player-object-exit player-token-motion' }
               : boardObjectMotion.tokens[token.id] || {};
             const footprint = tokenFootprint(token);
-            const tokenBox = tokenPixelBox(token, board);
+            const sourceBox = tokenPixelBox(token, board);
+            const isDragging = followsTokenDrag('token', token.id);
+            const tokenBox = isDragging
+              ? { ...sourceBox, left: sourceBox.left + tokenDragDelta.x, top: sourceBox.top + tokenDragDelta.y }
+              : sourceBox;
             const vehicleImage = token.vehicle?.backgroundImage || token.image;
             const isVehicle = token.tokenKind === 'vehicle';
             const isHexToken = token.tokenKind === 'hex50';
@@ -868,7 +1064,7 @@ export function BoardCanvas({
             return (
             <button
               key={token.exiting ? `exiting-token-${token.id}` : token.id}
-              className={`map-token token-${token.layer} ${token.image && !isVehicle ? 'token-image' : ''} ${isVehicle ? 'vehicle-token' : ''} ${isHexToken ? 'hex50-token' : ''} ${isVehicle && view === 'player' ? 'vehicle-token-player' : ''} ${vehicleImage && isVehicle ? 'has-vehicle-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''} ${motion.className || ''}`}
+              className={`map-token token-${token.layer} ${token.image && !isVehicle ? 'token-image' : ''} ${isVehicle ? 'vehicle-token' : ''} ${isHexToken ? 'hex50-token' : ''} ${isVehicle && view === 'player' ? 'vehicle-token-player' : ''} ${vehicleImage && isVehicle ? 'has-vehicle-image' : ''} ${!token.visible ? 'token-hidden' : ''} ${isSelected('token', token.id) ? 'selected' : ''} ${isDragging ? 'token-dragging' : ''} ${motion.className || ''}`}
               style={{
                 left: tokenBox.left,
                 top: tokenBox.top,
@@ -916,34 +1112,6 @@ export function BoardCanvas({
               <button onClick={() => { onRequestLibraryToken?.(tokenPrompt.cell); setTokenPrompt(null); }}>From library…</button>
             </div>
           )}
-          {contextMenu && (() => {
-            const menuItems = contextMenu.target.type === 'multi' ? contextMenu.target.items : [contextMenu.target];
-            const entityLayers = new Set(menuItems.flatMap((item) => {
-              if (item.type === 'token') {
-                const entity = board.tokens.find((candidate) => candidate.id === item.id);
-                return entity ? [entity.layer === 'dm' ? 'dm' : 'player'] : [];
-              }
-              if (item.type === 'drawing') {
-                const entity = board.drawings.find((candidate) => candidate.id === item.id);
-                return entity ? [entity.layer === 'dm' ? 'dm' : 'player'] : [];
-              }
-              return [];
-            }));
-            const layerLabel = contextMenu.target.type === 'multi' ? 'Move all to' : 'Move to';
-            return (
-              <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
-                {contextMenu.target.type !== 'multi' && <button onClick={() => { onDuplicateSelection(contextMenu.target); setContextMenu(null); }}>Duplicate</button>}
-                {contextMenu.target.type === 'door' && <button onClick={() => { onToggleDoor(contextMenu.target.id); setContextMenu(null); }}>Toggle open/closed</button>}
-                {entityLayers.has('player') && (
-                  <button onClick={() => { onChangeSelectionLayer?.(contextMenu.target, 'dm'); setContextMenu(null); }}>{layerLabel} GM layer</button>
-                )}
-                {entityLayers.has('dm') && (
-                  <button onClick={() => { onChangeSelectionLayer?.(contextMenu.target, 'player'); setContextMenu(null); }}>{layerLabel} Token layer</button>
-                )}
-                <button onClick={() => { onDeleteSelection(contextMenu.target); setContextMenu(null); }}>Delete</button>
-              </div>
-            );
-          })()}
           {lockedDoorAlert && (
             <div className="door-alert" style={{ left: lockedDoorAlert.x, top: lockedDoorAlert.y }}>
               Locked
@@ -952,8 +1120,54 @@ export function BoardCanvas({
         </div>
       </div>
     </div>
+    {contextMenu && createPortal((() => {
+      const target = contextMenu.target;
+      const menuItems = target?.type === 'multi' ? target.items : target ? [target] : [];
+      const entityLayers = new Set(menuItems.flatMap((item) => {
+        const entity = item.type === 'token' ? board.tokens.find((candidate) => candidate.id === item.id) : item.type === 'drawing' ? board.drawings.find((candidate) => candidate.id === item.id) : null;
+        return entity ? [entity.layer === 'dm' ? 'dm' : 'player'] : [];
+      }));
+      const layerLabel = target?.type === 'multi' ? 'Move all to' : 'Move to';
+      const run = (action) => {
+        action();
+        setContextMenu(null);
+        shellRef.current?.focus({ preventScroll: true });
+      };
+      return (
+        <div ref={menuRef} className="context-menu board-context-menu" role="menu" aria-label={target ? 'Selection actions' : 'Board actions'} style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 1000, maxHeight: 'calc(100dvh - 16px)', overflowY: 'auto' }} onContextMenu={(event) => event.preventDefault()} onKeyDown={(event) => {
+          if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+            event.preventDefault();
+            const buttons = [...event.currentTarget.querySelectorAll('button')];
+            const index = buttons.indexOf(document.activeElement);
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+            buttons[next]?.focus();
+          } else if (event.key === 'Tab') {
+            event.preventDefault();
+            setContextMenu(null);
+            shellRef.current?.focus({ preventScroll: true });
+          }
+        }}>
+          <span className="context-menu-heading">{target?.type === 'multi' ? `${menuItems.length} selected objects` : target ? `${target.type === 'wall' ? 'Wall' : target.type === 'door' ? 'Door' : target.type === 'drawing' ? 'Drawing' : 'Token'} actions` : 'Board navigation'}</span>
+          {target && <button type="button" role="menuitem" onClick={() => run(() => onDuplicateSelection(target))}>Duplicate <kbd>Ctrl/⌘ D</kbd></button>}
+          {target?.type === 'door' && <button type="button" role="menuitem" onClick={() => run(() => onToggleDoor(target.id))}>Toggle open / closed</button>}
+          {entityLayers.size > 0 && <div className="context-menu-divider" role="separator" />}
+          {entityLayers.has('player') && <button type="button" role="menuitem" onClick={() => run(() => onChangeSelectionLayer?.(target, 'dm'))}>{layerLabel} GM layer</button>}
+          {entityLayers.has('dm') && <button type="button" role="menuitem" onClick={() => run(() => onChangeSelectionLayer?.(target, 'player'))}>{layerLabel} Token layer</button>}
+          {target && <><div className="context-menu-divider" role="separator" /><button type="button" role="menuitem" className="context-menu-danger" onClick={() => run(() => onDeleteSelection(target))}>Delete selection</button></>}
+          {!target && <>
+            {view === 'dm' && onToolChange && <><button type="button" role="menuitem" onClick={() => run(() => onToolChange('select'))}>Select tool <kbd>V</kbd></button><button type="button" role="menuitem" onClick={() => run(() => onToolChange('pan'))}>Hand tool <kbd>H</kbd></button><div className="context-menu-divider" role="separator" /></>}
+            <button type="button" role="menuitem" onClick={() => run(fitBoard)}>Fit board <kbd>0</kbd></button>
+            <button type="button" role="menuitem" onClick={() => run(() => zoomAt(1))}>Reset zoom to 100%</button>
+          </>}
+        </div>
+      );
+    })(), document.body)}
     </>
   );
+}
+
+function isEditableTarget(target) {
+  return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]'));
 }
 
 function doorFromPoint(point) {

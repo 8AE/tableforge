@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   Grid2X2,
+  Hand,
   Image,
   Library,
   Layers,
@@ -32,6 +33,8 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { BoardCanvas } from './BoardCanvas';
+import { GridSettings } from './GridSettings';
+import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { Panel } from './Panel';
 import { Topbar } from './Topbar';
 import { normalizeFiveEToolsBaseUrl, TokenCreateModal, TokenLibraryModal } from './TokenLibrary';
@@ -53,6 +56,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [drawingsExpanded, setDrawingsExpanded] = useState(true);
   const [activeSidebarTab, setActiveSidebarTab] = useState('journal');
   const [isQuickMenuCollapsed, setIsQuickMenuCollapsed] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => window.localStorage.getItem('tableforge-dm-sidebar-collapsed') === 'true');
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('tableforge-dm-sidebar-width'));
     return Number.isFinite(saved) && saved >= 300 ? saved : 380;
@@ -82,6 +87,18 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const backgroundAssets = assets.filter((asset) => asset.type === 'image' || asset.type === 'video');
   const audioAssets = assets.filter((asset) => asset.type === 'audio');
   const sidebarStyle = { '--dm-sidebar-width': `${sidebarWidth}px` };
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((collapsed) => {
+      window.localStorage.setItem('tableforge-dm-sidebar-collapsed', String(!collapsed));
+      return !collapsed;
+    });
+  };
+  const openBoardSettings = (id) => {
+    setState((current) => ({ ...current, activeBoardId: id }), { skipHistory: true });
+    setActiveSidebarTab('settings');
+    setIsSidebarCollapsed(false);
+    window.localStorage.setItem('tableforge-dm-sidebar-collapsed', 'false');
+  };
 
   const startSidebarResize = (event) => {
     event.preventDefault();
@@ -751,7 +768,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
     }
     if (clipboard.type === 'drawing') {
-      const drawing = offsetDrawing({ ...clipboard.item, id: uid('drawing') }, 1, 1);
+      const drawing = { ...structuredClone(clipboard.item), ...offsetDrawing(clipboard.item, 1, 1), id: uid('drawing') };
       setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
       selectTarget({ type: 'drawing', id: drawing.id }, drawing.layer === 'dm' ? 'gm' : 'token');
     }
@@ -783,42 +800,26 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const duplicateSelection = (target = selected) => {
     if (!target) return;
-    if (target.type === 'token') {
-      const source = board.tokens.find((token) => token.id === target.id);
-      if (!source) return;
-      const token = { ...structuredClone(source), id: uid('token'), x: source.x + 1, y: source.y + 1 };
-      setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
-      selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
-    }
-    if (target.type === 'drawing') {
-      const source = board.drawings.find((drawing) => drawing.id === target.id);
-      if (!source) return;
-      const drawing = { ...structuredClone(source), ...offsetDrawing(source, 1, 1), id: uid('drawing') };
-      setState((current) => updateActiveBoard(current, (active) => ({ ...active, drawings: [...active.drawings, drawing] })));
-      selectTarget({ type: 'drawing', id: drawing.id }, drawing.layer === 'dm' ? 'gm' : 'token');
-    }
-    if (target.type === 'wall') {
-      const source = board.lighting?.walls?.find((wall) => wall.id === target.id);
-      if (!source) return;
-      const wall = {
-        ...structuredClone(source),
-        id: uid('wall'),
-        start: { x: source.start.x + 1, y: source.start.y + 1 },
-        end: { x: source.end.x + 1, y: source.end.y + 1 },
-      };
-      setState((current) => updateActiveBoard(current, (active) => ({
-        ...active,
-        lighting: { ...defaultLighting, ...active.lighting, walls: [...(active.lighting?.walls || []), wall] },
-      })));
-      selectTarget({ type: 'wall', id: wall.id }, 'walls');
-    }
-    if (target.type === 'door') {
-      const source = board.doors?.find((door) => door.id === target.id);
-      if (!source) return;
-      const door = { ...offsetEntity(structuredClone(source), 'door', 1, 1), id: uid('door') };
-      setState((current) => updateActiveBoard(current, (active) => ({ ...active, doors: [...(active.doors || []), door] })));
-      selectTarget({ type: 'door', id: door.id }, 'walls');
-    }
+    const targets = target.type === 'multi' ? target.items : [target];
+    const copies = targets.flatMap((item) => {
+      const source = getBoardEntity(board, item);
+      if (!source) return [];
+      return [{ type: item.type, entity: { ...offsetEntity(structuredClone(source), item.type, 1, 1), id: uid(item.type) } }];
+    });
+    if (!copies.length) return;
+    setState((current) => updateActiveBoard(current, (active) => ({
+      ...active,
+      tokens: [...active.tokens, ...copies.filter((item) => item.type === 'token').map((item) => item.entity)],
+      drawings: [...active.drawings, ...copies.filter((item) => item.type === 'drawing').map((item) => item.entity)],
+      doors: [...(active.doors || []), ...copies.filter((item) => item.type === 'door').map((item) => item.entity)],
+      lighting: {
+        ...defaultLighting,
+        ...active.lighting,
+        walls: [...(active.lighting?.walls || []), ...copies.filter((item) => item.type === 'wall').map((item) => item.entity)],
+      },
+    })));
+    const selection = copies.map((item) => ({ type: item.type, id: item.entity.id }));
+    selectTarget(selection.length === 1 ? selection[0] : { type: 'multi', items: selection });
   };
 
   const changeSelectionLayer = (target, layer) => {
@@ -852,7 +853,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     ['settings', 'Board Setup'],
   ];
   const quickMapTools = [
-    ['select', <MousePointer2 size={18} />, 'Select & Pan', 'V'],
+    ['select', <MousePointer2 size={18} />, 'Select', 'V'],
+    ['pan', <Hand size={18} />, 'Pan board', 'H'],
     ['token', <Plus size={18} />, 'Place Token', 'T'],
     ['draw', <Brush size={18} />, 'Drawing & Shapes', 'D'],
     ['ruler', <Ruler size={18} />, 'Ruler / Measurement', 'M'],
@@ -869,7 +871,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     const onKeyDown = (event) => {
       const mod = event.metaKey || event.ctrlKey;
       const tag = event.target?.tagName?.toLowerCase();
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
+        if (isShortcutsOpen) { setIsShortcutsOpen(false); return; }
         if (isCreateTokenOpen) { setIsCreateTokenOpen(false); setPendingTokenCell(null); }
         else if (libraryMode) { setLibraryMode(null); setPendingTokenCell(null); }
         else if (isDungeonImportOpen) setIsDungeonImportOpen(false);
@@ -880,9 +884,20 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         else if (tool !== 'select') activateTool('select');
         return;
       }
-      if (['input', 'select', 'textarea'].includes(tag)) return;
-      const keyTools = { v: 'select', t: 'token', d: 'draw', m: 'ruler', l: 'light' };
-      if (!event.metaKey && !event.ctrlKey && keyTools[event.key.toLowerCase()]) {
+      if (['input', 'select', 'textarea'].includes(tag) || event.target?.isContentEditable) return;
+      if (isShortcutsOpen || isCreateTokenOpen || libraryMode || isDungeonImportOpen || isFiveEToolsMapImportOpen || boardDeleteTarget || event.target?.closest?.('[role=dialog], dialog, [role=menu]')) return;
+      if (!mod && !event.altKey && event.key === '?') {
+        event.preventDefault();
+        setIsShortcutsOpen(true);
+        return;
+      }
+      if (!mod && !event.altKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        toggleSidebar();
+        return;
+      }
+      const keyTools = { v: 'select', h: 'pan', t: 'token', d: 'draw', m: 'ruler', l: 'light' };
+      if (!mod && !event.altKey && keyTools[event.key.toLowerCase()]) {
         event.preventDefault();
         activateTool(keyTools[event.key.toLowerCase()]);
         return;
@@ -894,18 +909,22 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         arrowright: [1, 0],
       };
       const arrowDelta = arrowDeltas[event.key.toLowerCase()];
-      if (arrowDelta && selected) {
+      if (arrowDelta && selected && !mod && !event.altKey && !event.target?.closest?.('.sidebar, .topbar')) {
         event.preventDefault();
         if (selected.type === 'multi') moveSelection(selected.items, arrowDelta[0], arrowDelta[1]);
         else nudgeSelection(arrowDelta[0], arrowDelta[1]);
         return;
       }
-      if (['backspace', 'delete'].includes(event.key.toLowerCase()) && selected) {
+      if (['backspace', 'delete'].includes(event.key.toLowerCase()) && selected && !event.target?.closest?.('.sidebar, .topbar')) {
         event.preventDefault();
         deleteSelection();
         return;
       }
-      if (!mod) return;
+      if (!mod || event.altKey) return;
+      if (event.key.toLowerCase() === 'd' && selected) {
+        event.preventDefault();
+        duplicateSelection();
+      }
       if (event.key.toLowerCase() === 'c') {
         event.preventDefault();
         copySelection();
@@ -928,11 +947,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo, tool, isCreateTokenOpen, libraryMode, isDungeonImportOpen, isFiveEToolsMapImportOpen, boardDeleteTarget]);
+  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo, tool, isCreateTokenOpen, libraryMode, isDungeonImportOpen, isFiveEToolsMapImportOpen, boardDeleteTarget, isShortcutsOpen]);
 
   return (
     <>
-      <section className="workspace" style={sidebarStyle}>
+      <section className={`workspace ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={sidebarStyle}>
         <Topbar
           board={board}
           mode="dm"
@@ -941,6 +960,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           playerBoardId={state.playerBoardId}
           activeLayer={activeLayer}
           onLayerChange={switchActiveLayer}
+          onOpenBoardSettings={openBoardSettings}
+          onOpenShortcuts={() => setIsShortcutsOpen(true)}
+          onToggleSidebar={toggleSidebar}
+          isSidebarCollapsed={isSidebarCollapsed}
           onBoardSelect={(id) => setState((current) => ({ ...current, activeBoardId: id }), { skipHistory: true })}
           onAddBoard={addBoard}
           onImportBoard={openDungeonImport}
@@ -966,8 +989,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
                 <button
                   key={id}
                   type="button"
-                  title={label}
+                  title={`${label} (${hotkey})`}
                   aria-label={label}
+                  aria-pressed={tool === id}
                   className={tool === id ? 'active' : ''}
                   onClick={() => activateTool(id)}
                 >
@@ -1024,6 +1048,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             board={board}
             view="dm"
             tool={tool}
+            onToolChange={activateTool}
             selected={selected}
             setSelected={selectTarget}
             activeLayer={activeLayer}
@@ -1054,13 +1079,21 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         </div>
       </section>
 
-      <aside className="sidebar" style={sidebarStyle}>
+      <aside className={`sidebar ${isSidebarCollapsed ? 'is-collapsed' : ''}`} style={sidebarStyle}>
         <button
           className="sidebar-resize-handle"
           type="button"
           aria-label="Resize right sidebar"
           title="Resize sidebar"
           onPointerDown={startSidebarResize}
+          onKeyDown={(event) => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return;
+            event.preventDefault();
+            const maxWidth = Math.min(620, Math.max(300, window.innerWidth - 420));
+            const nextWidth = event.key === 'Home' ? Math.min(380, maxWidth) : Math.max(300, Math.min(maxWidth, sidebarWidth + (event.key === 'ArrowLeft' ? 20 : -20)));
+            setSidebarWidth(nextWidth);
+            window.localStorage.setItem('tableforge-dm-sidebar-width', String(nextWidth));
+          }}
         />
         <div className="brand">
           <Grid2X2 size={22} />
@@ -1076,6 +1109,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
               key={id}
               type="button"
               className={activeSidebarTab === id ? 'active' : ''}
+              aria-pressed={activeSidebarTab === id}
               onClick={() => setActiveSidebarTab(id)}
             >
               {label}
@@ -1145,14 +1179,14 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           <button className="command accent" title="Open the standalone dungeon builder" onClick={onOpenDungeonBuilder}><Grid2X2 size={16} /> Launch Dungeon Builder</button>
         </Panel>
 
-        <Panel title="Board" icon={<Image size={16} />}>
+        <Panel title="Board Settings" icon={<Image size={16} />}>
           <label>
             Name
             <input value={board.name} onChange={(event) => updateBoard({ name: event.target.value })} />
           </label>
           <label>
             Grid
-            <select value={board.grid?.mode || 'square-5ft'} onChange={(event) => updateBoard({ grid: { mode: event.target.value } })}>
+            <select value={board.grid?.mode || 'square-5ft'} onChange={(event) => updateBoard({ grid: { ...board.grid, mode: event.target.value } })}>
               <option value="square-5ft">Standard 5 ft square grid</option>
               <option value="hex-50ft">50 ft hex grid</option>
             </select>
@@ -1168,6 +1202,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             </label>
           </div>
           <p className="empty-note">{boardGridLabel(board)}</p>
+          <GridSettings grid={board.grid} onChange={(grid) => updateBoard({ grid })} />
           <label>
             Cell pixels
             <input type="range" min="24" max="72" value={board.tileSize} onChange={(event) => updateBoard({ tileSize: Number(event.target.value) })} />
@@ -1533,6 +1568,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           )}
         </div>
       </aside>
+
+      {isShortcutsOpen && <KeyboardShortcutsDialog onClose={() => setIsShortcutsOpen(false)} />}
 
       {libraryMode && (
         <TokenLibraryModal
