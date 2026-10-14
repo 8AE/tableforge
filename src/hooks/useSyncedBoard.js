@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CHANNEL_KEY, makeProject, migrateState } from '../lib/board';
+import { makeFiveEToolsMapBoard, normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
 
 function isNewer(a, b) {
   return new Date(a?.updatedAt || 0).getTime() > new Date(b?.updatedAt || 0).getTime();
@@ -99,9 +100,79 @@ export function useSyncedBoard() {
     saveTimerRef.current = window.setTimeout(() => saveProject(project), 250);
   };
 
-  const createProject = async (name) => {
+  const importMapsIntoProject = async (project, maps, options = {}) => {
+    const mapList = Array.from(maps || []).filter((map) => map?.imageUrl);
+    if (!mapList.length) return { ok: false, error: 'Select at least one map to import.' };
+
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    pendingSaveRef.current = project.id;
+
+    try {
+      let assets = Array.isArray(project.assets) ? project.assets : [];
+      const importedBoards = [];
+
+      for (let index = 0; index < mapList.length; index += 1) {
+        const map = mapList[index];
+        options.onProgress?.({ completed: index, total: mapList.length, map });
+        const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/assets/remote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: map.imageUrl,
+            name: map.displayTitle || 'Imported Map',
+            category: 'map',
+          }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `Unable to import ${map.displayTitle || 'map'}.`);
+        assets = body.assets || assets;
+        importedBoards.push(makeFiveEToolsMapBoard(map, body.asset.path));
+      }
+
+      const firstImportedBoard = importedBoards[0];
+      const replaceBoards = Boolean(options.replaceBoards);
+      const nextState = migrateState({
+        ...project.state,
+        fiveEToolsBaseUrl: normalizeFiveEToolsBaseUrl(options.baseUrl || project.state?.fiveEToolsBaseUrl),
+        boards: replaceBoards ? importedBoards : [...(project.state?.boards || []), ...importedBoards],
+        activeBoardId: firstImportedBoard.id,
+        playerBoardId: replaceBoards ? firstImportedBoard.id : project.state?.playerBoardId,
+      });
+      const updatedProject = {
+        ...project,
+        state: nextState,
+        assets,
+        updatedAt: new Date().toISOString(),
+      };
+      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedProject),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Unable to save the imported maps.');
+
+      options.onProgress?.({ completed: mapList.length, total: mapList.length, map: null });
+      pendingSaveRef.current = null;
+      commitPayload(payload);
+      return { ok: true, assets, importedBoards, payload };
+    } catch (importError) {
+      pendingSaveRef.current = null;
+      const message = importError.message || 'Unable to import 5e.tools maps.';
+      setError(message);
+      return { ok: false, error: message };
+    }
+  };
+
+  const createProject = async (name, options = {}) => {
     setError('');
     const project = makeProject(name.trim() || 'New Campaign');
+    if (options.baseUrl) {
+      project.state.fiveEToolsBaseUrl = normalizeFiveEToolsBaseUrl(options.baseUrl);
+    }
     const response = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -110,13 +181,40 @@ export function useSyncedBoard() {
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       setError(body.error || 'Unable to create project.');
-      return;
+      return { ok: false, error: body.error || 'Unable to create project.' };
     }
     const payload = await response.json();
+    if (options.maps?.length) {
+      const result = await importMapsIntoProject(project, options.maps, {
+        baseUrl: options.baseUrl,
+        replaceBoards: true,
+        onProgress: options.onProgress,
+      });
+      if (!result.ok) return { ...result, projectCreated: true, projectId: project.id };
+      setSelectedProjectId(project.id);
+      setPast([]);
+      setFuture([]);
+      return { ...result, projectId: project.id };
+    }
     setSelectedProjectId(project.id);
     setPast([]);
     setFuture([]);
     commitPayload(payload);
+    return { ok: true, projectId: project.id };
+  };
+
+  const importFiveEToolsMaps = async (maps, options = {}) => {
+    setError('');
+    const projectId = options.projectId || selectedProjectIdRef.current;
+    const project = projectsRef.current.find((item) => item.id === projectId);
+    if (!project) return { ok: false, error: 'Open a campaign before importing 5e.tools maps.' };
+    const previousState = project.state;
+    const result = await importMapsIntoProject(project, maps, options);
+    if (result.ok) {
+      setPast((items) => [...items.slice(-39), previousState]);
+      setFuture([]);
+    }
+    return result;
   };
 
   const openProject = async (id) => {
@@ -266,6 +364,7 @@ export function useSyncedBoard() {
     deleteProject,
     deleteBoard,
     importProject,
+    importFiveEToolsMaps,
     publishProjectToPlayers,
     updateProjectState,
     undo,

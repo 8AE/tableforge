@@ -994,7 +994,7 @@ app.get('/api/5etools', async (request, response) => {
     const data = await upstream.json();
     response.json(data);
   } catch {
-    response.status(400).json({ error: 'Unable to load 5e.tools JSON. Check the base URL and bestiary data files.' });
+    response.status(400).json({ error: 'Unable to load 5e.tools JSON. Check the base URL and data files.' });
   }
 });
 
