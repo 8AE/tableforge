@@ -1006,7 +1006,7 @@ export function BoardCanvas({
             {displayDrawings.map((drawing) => renderDraggedGroupItem('drawing', drawing, renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id), boardObjectMotion.drawings[drawing.id])))}
             {boardObjectMotion.exiting.drawings.map((drawing) => renderDrawing(drawing, tile, board, null, false, { className: 'player-object-exit player-svg-motion' }, `exiting-drawing-${drawing.id}`))}
             {liveDrawing.map((drawing) => renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id)))}
-            {view === 'dm' && displayWalls.filter((wall) => wall.source !== 'dungeon-scrawl' || activeLayer === 'walls' || isSelected('wall', wall.id)).map((wall) => renderDraggedGroupItem('wall', wall, renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id))))}
+            {view === 'dm' && displayWalls.filter((wall) => !['dungeon-scrawl', 'inkarnate'].includes(wall.source) || activeLayer === 'walls' || isSelected('wall', wall.id)).map((wall) => renderDraggedGroupItem('wall', wall, renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id))))}
             {displayDoors.map((door) => renderDraggedGroupItem('door', door, renderDoor(door, tile, view, isSelected('door', door.id), boardObjectMotion.doors[door.id])))}
             {boardObjectMotion.exiting.doors.map((door) => renderDoor(door, tile, view, false, { className: 'player-object-exit player-door-motion' }, `exiting-door-${door.id}`))}
             {liveMarquee && (

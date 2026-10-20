@@ -3,6 +3,8 @@ import { CHANNEL_KEY, makeProject, migrateState } from '../lib/board';
 import { makeFiveEToolsMapBoard, normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
 import { makeDungeonScrawlBoard } from '../lib/dungeonScrawl';
 import { renderDungeonScrawlPng } from '../lib/dungeonScrawlImage';
+import { makeInkarnateBoard } from '../lib/inkarnate';
+import { renderInkarnatePng } from '../lib/inkarnateImage';
 
 function isNewer(a, b) {
   return new Date(a?.updatedAt || 0).getTime() > new Date(b?.updatedAt || 0).getTime();
@@ -237,14 +239,14 @@ export function useSyncedBoard() {
     return result;
   };
 
-  const importDungeonScrawl = async (map, options = {}) => {
+  const importMapFile = async (map, options = {}, { renderImage, makeBoard, endpoint }) => {
     setError('');
     const projectId = options.createCampaign ? null : selectedProjectIdRef.current;
     if (!options.createCampaign && !projectId) return { ok: false, error: 'Open a campaign before importing a map.' };
     try {
       // Render before changing campaign state. A failed image decode leaves the
       // campaign untouched. Drain delayed saves before the atomic board import.
-      const image = await renderDungeonScrawlPng(map);
+      const image = await renderImage(map);
       const project = projectsRef.current.find((item) => item.id === projectId);
       const previousState = project?.state;
       const pendingProject = projectsRef.current.find((item) => item.id === pendingSaveRef.current);
@@ -255,13 +257,13 @@ export function useSyncedBoard() {
         const saved = await saveProject(pendingProject);
         if (!saved.ok) throw new Error(saved.error);
       }
-      const board = makeDungeonScrawlBoard(map, '', options);
+      const board = makeBoard(map, '', options);
       const form = new FormData();
       form.append('file', image);
       form.append('board', JSON.stringify(board));
       if (projectId) form.append('projectId', projectId);
       else form.append('campaignName', options.campaignName?.trim() || board.name);
-      const response = await fetch('/api/dungeon-scrawl/import', { method: 'POST', body: form });
+      const response = await fetch(endpoint, { method: 'POST', body: form });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'Unable to save the imported map.');
       pendingSaveRef.current = null;
@@ -271,9 +273,12 @@ export function useSyncedBoard() {
       setFuture([]);
       return { ok: true, assets: payload.assets, boardId: payload.importedBoardId };
     } catch (importError) {
-      return { ok: false, error: importError.message || 'Unable to import this Dungeon Scrawl map.' };
+      return { ok: false, error: importError.message || 'Unable to import this map.' };
     }
   };
+
+  const importDungeonScrawl = (map, options) => importMapFile(map, options, { renderImage: renderDungeonScrawlPng, makeBoard: makeDungeonScrawlBoard, endpoint: '/api/dungeon-scrawl/import' });
+  const importInkarnate = (map, options) => importMapFile(map, options, { renderImage: renderInkarnatePng, makeBoard: makeInkarnateBoard, endpoint: '/api/inkarnate/import' });
 
   const openProject = async (id) => {
     setSelectedProjectId(id);
@@ -424,6 +429,7 @@ export function useSyncedBoard() {
     importProject,
     importFiveEToolsMaps,
     importDungeonScrawl,
+    importInkarnate,
     publishProjectToPlayers,
     updateProjectState,
     undo,

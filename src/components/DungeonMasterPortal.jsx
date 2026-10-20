@@ -40,10 +40,11 @@ import { Panel } from './Panel';
 import { Topbar } from './Topbar';
 import { TokenCreateModal, TokenLibraryModal } from './TokenLibrary';
 import { areTokenAndBoardCompatible, boardGridLabel, boxesOverlap, defaultLighting, getBoard, getBoardEntity, GRID_HEX_50FT, incompatibleTokenGridMessage, isHexBoard, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, tokenFootprint, uid, updateActiveBoard } from '../lib/board';
+import { InkarnateImporter } from './InkarnateImporter';
 import { DungeonScrawlImporter } from './DungeonScrawlImporter';
 import { normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
 
-export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, importFiveEToolsMaps, undo, redo, canUndo, canRedo, importDungeonScrawl }) {
+export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, importFiveEToolsMaps, undo, redo, canUndo, canRedo, importDungeonScrawl, importInkarnate }) {
   const [tool, setTool] = useState('select');
   const [activeLayer, setActiveLayer] = useState('token');
   const [layerNotice, setLayerNotice] = useState('');
@@ -72,7 +73,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [assetCategory, setAssetCategory] = useState('token');
   const [assetError, setAssetError] = useState('');
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
-  const [isDungeonImportOpen, setIsDungeonImportOpen] = useState(false);
+  const [mapImportKind, setMapImportKind] = useState(false);
+  const MapImporter = mapImportKind === 'inkarnate' ? InkarnateImporter : DungeonScrawlImporter;
   const [isFiveEToolsMapImportOpen, setIsFiveEToolsMapImportOpen] = useState(false);
   const [boardDeleteTarget, setBoardDeleteTarget] = useState(null);
   const [boardDeleteError, setBoardDeleteError] = useState('');
@@ -769,7 +771,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         if (isShortcutsOpen) { setIsShortcutsOpen(false); return; }
         if (isCreateTokenOpen) { setIsCreateTokenOpen(false); setPendingTokenCell(null); }
         else if (libraryMode) { setLibraryMode(null); setPendingTokenCell(null); }
-        else if (isDungeonImportOpen) return;
+        else if (mapImportKind) return;
         else if (isFiveEToolsMapImportOpen) setIsFiveEToolsMapImportOpen(false);
         else if (boardDeleteTarget) setBoardDeleteTarget(null);
         else if (['input', 'select', 'textarea'].includes(tag)) event.target.blur?.();
@@ -778,7 +780,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         return;
       }
       if (['input', 'select', 'textarea'].includes(tag) || event.target?.isContentEditable) return;
-      if (isShortcutsOpen || isCreateTokenOpen || libraryMode || isDungeonImportOpen || isFiveEToolsMapImportOpen || boardDeleteTarget || event.target?.closest?.('[role=dialog], dialog, [role=menu]')) return;
+      if (isShortcutsOpen || isCreateTokenOpen || libraryMode || mapImportKind || isFiveEToolsMapImportOpen || boardDeleteTarget || event.target?.closest?.('[role=dialog], dialog, [role=menu]')) return;
       if (!mod && !event.altKey && event.key === '?') {
         event.preventDefault();
         setIsShortcutsOpen(true);
@@ -840,7 +842,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo, tool, isCreateTokenOpen, libraryMode, isDungeonImportOpen, isFiveEToolsMapImportOpen, boardDeleteTarget, isShortcutsOpen]);
+  }, [board, selected, selectedItems, selectedToken, selectedDrawing, selectedDoor, clipboard, undo, redo, tool, isCreateTokenOpen, libraryMode, mapImportKind, isFiveEToolsMapImportOpen, boardDeleteTarget, isShortcutsOpen]);
 
   return (
     <>
@@ -859,7 +861,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           isSidebarCollapsed={isSidebarCollapsed}
           onBoardSelect={(id) => setState((current) => ({ ...current, activeBoardId: id }), { skipHistory: true })}
           onAddBoard={addBoard}
-          onImportBoard={() => setIsDungeonImportOpen(true)}
+          onImportBoard={() => setMapImportKind('dungeon-scrawl')}
+          onImportInkarnate={() => setMapImportKind('inkarnate')}
           onImportFiveEToolsMap={() => {
             setIsFiveEToolsMapImportOpen(true);
           }}
@@ -1067,8 +1070,9 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           {activeSidebarTab === 'settings' && (
             <div className="sidebar-tab-panel">
 
-        <Panel title="Dungeon Scrawl" icon={<Grid2X2 size={16} />}>
-          <button className="command accent" onClick={() => setIsDungeonImportOpen(true)}><Upload size={16} /> Import Dungeon Scrawl (.ds)</button>
+        <Panel title="Import Map" icon={<Grid2X2 size={16} />}>
+          <button className="command accent" onClick={() => setMapImportKind('dungeon-scrawl')}><Upload size={16} /> Import Dungeon Scrawl (.ds)</button>
+          <button className="command" onClick={() => setMapImportKind('inkarnate')}><Upload size={16} /> Import Inkarnate (.ink)</button>
         </Panel>
 
         {board.lighting?.lights?.length > 0 && <Panel title="Imported Lights" icon={<Lightbulb size={16} />}>
@@ -1503,10 +1507,10 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         />
       )}
 
-      {isDungeonImportOpen && (
-        <DungeonScrawlImporter
+      {mapImportKind && (
+        <MapImporter
           onImport={async (map, options) => {
-            const result = await importDungeonScrawl(map, options);
+            const result = await (mapImportKind === 'inkarnate' ? importInkarnate : importDungeonScrawl)(map, options);
             if (result.ok) {
               setAssets(result.assets);
               setSelected(null);
@@ -1514,7 +1518,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             }
             return result;
           }}
-          onClose={() => setIsDungeonImportOpen(false)}
+          onClose={() => setMapImportKind(false)}
         />
       )}
 

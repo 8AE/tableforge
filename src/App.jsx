@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BookOpen, Github, X } from 'lucide-react';
+import { InkarnateImporter } from './components/InkarnateImporter';
 import { DungeonScrawlImporter } from './components/DungeonScrawlImporter';
 import { DungeonMasterPortal } from './components/DungeonMasterPortal';
 import { FiveEToolsMapImporter } from './components/FiveEToolsMapImporter';
@@ -28,6 +29,7 @@ export function App() {
     importProject,
     importFiveEToolsMaps,
     importDungeonScrawl,
+    importInkarnate,
     publishProjectToPlayers,
     updateProjectState,
     undo,
@@ -57,6 +59,7 @@ export function App() {
           onDeleteProject={deleteProject}
           onImportProject={importProject}
           importDungeonScrawl={importDungeonScrawl}
+          importInkarnate={importInkarnate}
         />
       ) : mode === 'dm' ? (
         <DungeonMasterPortal
@@ -75,6 +78,7 @@ export function App() {
           canUndo={canUndo}
           canRedo={canRedo}
           importDungeonScrawl={importDungeonScrawl}
+          importInkarnate={importInkarnate}
         />
       ) : (
         <PlayerViewer state={playerState} projectId={playerProjectId} updateProjectState={updateProjectState} />
@@ -83,7 +87,7 @@ export function App() {
   );
 }
 
-function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenProject, onRenameProject, onDeleteProject, onImportProject, importDungeonScrawl }) {
+function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenProject, onRenameProject, onDeleteProject, onImportProject, importDungeonScrawl, importInkarnate }) {
   const [name, setName] = useState('New Campaign');
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
@@ -93,7 +97,8 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
   const [importMessage, setImportMessage] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [isBookImportOpen, setIsBookImportOpen] = useState(false);
-  const [isScrawlImportOpen, setIsScrawlImportOpen] = useState(false);
+  const [mapImportKind, setMapImportKind] = useState(false);
+  const MapImporter = mapImportKind === 'inkarnate' ? InkarnateImporter : DungeonScrawlImporter;
   const [bookCampaignName, setBookCampaignName] = useState('');
   const [fiveEToolsBaseUrl, setFiveEToolsBaseUrl] = useState('https://5e.tools/');
 
@@ -137,7 +142,8 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
               <strong>Open a project</strong>
               <span>Projects are saved on this host machine and shared with connected players.</span>
             </div>
-            <button className="project-scrawl-button" onClick={() => setIsScrawlImportOpen(true)}>Import Dungeon Scrawl (.ds)</button>
+            <button className="project-scrawl-button" onClick={() => setMapImportKind('dungeon-scrawl')}>Import Dungeon Scrawl (.ds)</button>
+            <button className="project-scrawl-button" onClick={() => setMapImportKind('inkarnate')}>Import Inkarnate (.ink)</button>
             <label className="project-import-button">
               Import Campaign
               <input type="file" accept=".zip,application/zip" onChange={handleImportChange} disabled={isImporting} />
@@ -228,11 +234,11 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
           </div>
         </div>
       )}
-      {isScrawlImportOpen && (
-        <DungeonScrawlImporter
+      {mapImportKind && (
+        <MapImporter
           createCampaign
-          onImport={(map, options) => importDungeonScrawl(map, { ...options, createCampaign: true })}
-          onClose={() => setIsScrawlImportOpen(false)}
+          onImport={(map, options) => (mapImportKind === 'inkarnate' ? importInkarnate : importDungeonScrawl)(map, { ...options, createCampaign: true })}
+          onClose={() => setMapImportKind(false)}
         />
       )}
       {isBookImportOpen && (

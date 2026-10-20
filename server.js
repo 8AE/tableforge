@@ -478,10 +478,10 @@ app.get('/api/projects', async (_request, response) => {
   response.json(await readProjects());
 });
 
-// The client decodes .ds and renders a PNG before this request. Commit the
+// The client decodes a map backup and prepares a PNG before this request. Commit the
 // background and complete board together, preserving the current player board.
 const scrawlUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, fieldSize: 4 * 1024 * 1024, files: 1, fields: 3 } });
-app.post('/api/dungeon-scrawl/import', (request, response, next) => {
+app.post(['/api/dungeon-scrawl/import', '/api/inkarnate/import'], (request, response, next) => {
   scrawlUpload.single('file')(request, response, (error) => {
     if (error) response.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'The rendered map exceeds 25 MB. Import a smaller map.' : 'Unable to read the map upload.' });
     else next();
@@ -496,7 +496,8 @@ app.post('/api/dungeon-scrawl/import', (request, response, next) => {
     let raw;
     try { raw = JSON.parse(request.body.board); } catch { throw new Error('Invalid imported board.'); }
     const validPoint = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && Math.abs(p.x) <= 1000 && Math.abs(p.y) <= 1000;
-    if (raw?.importMetadata?.source !== 'dungeon-scrawl' || typeof raw.name !== 'string' || !raw.name.trim()
+    const expectedSource = request.path === '/api/inkarnate/import' ? 'inkarnate' : 'dungeon-scrawl';
+    if (raw?.importMetadata?.source !== expectedSource || typeof raw.name !== 'string' || !raw.name.trim()
       || ![raw.rows, raw.columns].every((n) => Number.isInteger(n) && n >= 4 && n <= 200)
       || !Array.isArray(raw.lighting?.walls) || raw.lighting.walls.length > 4000
       || raw.lighting.walls.some((wall) => !validPoint(wall.start) || !validPoint(wall.end))
