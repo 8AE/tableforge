@@ -40,10 +40,10 @@ import { Panel } from './Panel';
 import { Topbar } from './Topbar';
 import { TokenCreateModal, TokenLibraryModal } from './TokenLibrary';
 import { areTokenAndBoardCompatible, boardGridLabel, boxesOverlap, defaultLighting, getBoard, getBoardEntity, GRID_HEX_50FT, incompatibleTokenGridMessage, isHexBoard, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, tokenFootprint, uid, updateActiveBoard } from '../lib/board';
-import { dungeonToBoard, normalizeDungeon } from '../lib/dungeon';
+import { DungeonScrawlImporter } from './DungeonScrawlImporter';
 import { normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
 
-export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, importFiveEToolsMaps, undo, redo, canUndo, canRedo, onOpenDungeonBuilder }) {
+export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, importFiveEToolsMaps, undo, redo, canUndo, canRedo, importDungeonScrawl }) {
   const [tool, setTool] = useState('select');
   const [activeLayer, setActiveLayer] = useState('token');
   const [layerNotice, setLayerNotice] = useState('');
@@ -76,8 +76,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [isFiveEToolsMapImportOpen, setIsFiveEToolsMapImportOpen] = useState(false);
   const [boardDeleteTarget, setBoardDeleteTarget] = useState(null);
   const [boardDeleteError, setBoardDeleteError] = useState('');
-  const [dungeonLibrary, setDungeonLibrary] = useState([]);
-  const [dungeonImportError, setDungeonImportError] = useState('');
   const board = getBoard(state, state.activeBoardId);
   const tokenLibrary = state.tokenLibrary || [];
   const imageAssets = assets.filter((asset) => asset.type === 'image');
@@ -456,37 +454,6 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     setState((current) => ({ ...current, boards: [...current.boards, next], activeBoardId: next.id }));
   };
 
-  const openDungeonImport = async () => {
-    setDungeonImportError('');
-    setIsDungeonImportOpen(true);
-    try {
-      const response = await fetch('/api/dungeons');
-      if (!response.ok) throw new Error('Unable to load dungeon library.');
-      const data = await response.json();
-      setDungeonLibrary(data.dungeons || []);
-    } catch (error) {
-      setDungeonImportError(error.message || 'Unable to load dungeon library.');
-    }
-  };
-
-  const importDungeonAsBoard = async (dungeonSummary) => {
-    try {
-      const response = await fetch(`/api/dungeons/${encodeURIComponent(dungeonSummary.id)}`);
-      if (!response.ok) throw new Error('Unable to load dungeon.');
-      const data = await response.json();
-      const nextBoard = dungeonToBoard(normalizeDungeon(data.dungeon));
-      setState((current) => ({
-        ...current,
-        boards: [...current.boards, nextBoard],
-        activeBoardId: nextBoard.id,
-      }));
-      setIsDungeonImportOpen(false);
-      setActiveSidebarTab('map');
-    } catch (error) {
-      setDungeonImportError(error.message || 'Unable to import dungeon.');
-    }
-  };
-
   const duplicateBoard = (boardId = board.id) => {
     const sourceBoard = state.boards.find((item) => item.id === boardId) || board;
     const next = {
@@ -802,7 +769,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
         if (isShortcutsOpen) { setIsShortcutsOpen(false); return; }
         if (isCreateTokenOpen) { setIsCreateTokenOpen(false); setPendingTokenCell(null); }
         else if (libraryMode) { setLibraryMode(null); setPendingTokenCell(null); }
-        else if (isDungeonImportOpen) setIsDungeonImportOpen(false);
+        else if (isDungeonImportOpen) return;
         else if (isFiveEToolsMapImportOpen) setIsFiveEToolsMapImportOpen(false);
         else if (boardDeleteTarget) setBoardDeleteTarget(null);
         else if (['input', 'select', 'textarea'].includes(tag)) event.target.blur?.();
@@ -892,7 +859,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           isSidebarCollapsed={isSidebarCollapsed}
           onBoardSelect={(id) => setState((current) => ({ ...current, activeBoardId: id }), { skipHistory: true })}
           onAddBoard={addBoard}
-          onImportBoard={openDungeonImport}
+          onImportBoard={() => setIsDungeonImportOpen(true)}
           onImportFiveEToolsMap={() => {
             setIsFiveEToolsMapImportOpen(true);
           }}
@@ -1100,9 +1067,17 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           {activeSidebarTab === 'settings' && (
             <div className="sidebar-tab-panel">
 
-        <Panel title="Dungeon Builder" icon={<Grid2X2 size={16} />}>
-          <button className="command accent" title="Open the standalone dungeon builder" onClick={onOpenDungeonBuilder}><Grid2X2 size={16} /> Launch Dungeon Builder</button>
+        <Panel title="Dungeon Scrawl" icon={<Grid2X2 size={16} />}>
+          <button className="command accent" onClick={() => setIsDungeonImportOpen(true)}><Upload size={16} /> Import Dungeon Scrawl (.ds)</button>
         </Panel>
+
+        {board.lighting?.lights?.length > 0 && <Panel title="Imported Lights" icon={<Lightbulb size={16} />}>
+          {board.lighting.lights.map((light) => <div className="scrawl-light" key={light.id}>
+            <label className="check-row"><input type="checkbox" checked={light.visible !== false} onChange={(event) => updateLighting({ lights: board.lighting.lights.map((item) => item.id === light.id ? { ...item, visible: event.target.checked } : item) })} />{light.name}</label>
+            <label>Radius (ft)<ClampedNumberInput min={0} max={1000} value={light.radiusFeet} onCommit={(radiusFeet) => updateLighting({ lights: board.lighting.lights.map((item) => item.id === light.id ? { ...item, radiusFeet, brightFeet: Math.min(item.brightFeet, radiusFeet) } : item) })} /></label>
+            <label>Colour<input type="color" value={light.color} onChange={(event) => updateLighting({ lights: board.lighting.lights.map((item) => item.id === light.id ? { ...item, color: event.target.value } : item) })} /></label>
+          </div>)}
+        </Panel>}
 
         <Panel title="Board Settings" icon={<Image size={16} />}>
           <label>
@@ -1529,33 +1504,18 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
       )}
 
       {isDungeonImportOpen && (
-        <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Import dungeon map">
-          <div className="library-modal dungeon-import-modal">
-            <div className="library-modal-header">
-              <div>
-                <strong>Import Dungeon Map</strong>
-                <span>Select a global dungeon to instantiate as a campaign board with lighting walls and terrain metadata.</span>
-              </div>
-              <button onClick={() => setIsDungeonImportOpen(false)} aria-label="Close dungeon import"><X size={18} /></button>
-            </div>
-            {dungeonImportError && <p className="form-error">{dungeonImportError}</p>}
-            <div className="dungeon-import-grid">
-              {dungeonLibrary.map((dungeon) => (
-                <article className="dungeon-card" key={dungeon.id}>
-                  <div className="dungeon-thumb">
-                    {dungeon.thumbnailUrl ? <img src={`${dungeon.thumbnailUrl}?v=${encodeURIComponent(dungeon.updatedAt || '')}`} alt="" /> : <Grid2X2 size={30} />}
-                  </div>
-                  <div className="dungeon-card-body">
-                    <strong>{dungeon.name}</strong>
-                    <span>{dungeon.gridSize?.width || 0} x {dungeon.gridSize?.height || 0}</span>
-                  </div>
-                  <button className="command accent" onClick={() => importDungeonAsBoard(dungeon)}>Import</button>
-                </article>
-              ))}
-              {!dungeonLibrary.length && <div className="library-empty"><strong>No dungeons found</strong><span>Create one from the Dungeon Builder first.</span></div>}
-            </div>
-          </div>
-        </div>
+        <DungeonScrawlImporter
+          onImport={async (map, options) => {
+            const result = await importDungeonScrawl(map, options);
+            if (result.ok) {
+              setAssets(result.assets);
+              setSelected(null);
+              setActiveSidebarTab('settings');
+            }
+            return result;
+          }}
+          onClose={() => setIsDungeonImportOpen(false)}
+        />
       )}
 
       {isFiveEToolsMapImportOpen && (

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BookOpen, Github, X } from 'lucide-react';
-import { DungeonBuilder } from './components/DungeonBuilder';
+import { DungeonScrawlImporter } from './components/DungeonScrawlImporter';
 import { DungeonMasterPortal } from './components/DungeonMasterPortal';
 import { FiveEToolsMapImporter } from './components/FiveEToolsMapImporter';
 import { PlayerViewer } from './components/PlayerViewer';
@@ -27,6 +27,7 @@ export function App() {
     deleteBoard,
     importProject,
     importFiveEToolsMaps,
+    importDungeonScrawl,
     publishProjectToPlayers,
     updateProjectState,
     undo,
@@ -35,7 +36,6 @@ export function App() {
     canRedo,
   } = useSyncedBoard();
   const [mode, setMode] = useState(() => new URLSearchParams(window.location.search).get('view') === 'player' ? 'player' : 'dm');
-  const [workspace, setWorkspace] = useState('tableforge');
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -46,9 +46,7 @@ export function App() {
 
   return (
     <main className={`app app-${mode}`}>
-      {workspace === 'dungeon' ? (
-        <DungeonBuilder onBack={() => setWorkspace('tableforge')} />
-      ) : mode === 'dm' && !state ? (
+      {mode === 'dm' && !state ? (
         <ProjectLauncher
           projects={projects}
           isLoading={isLoading}
@@ -58,7 +56,7 @@ export function App() {
           onRenameProject={renameProject}
           onDeleteProject={deleteProject}
           onImportProject={importProject}
-          onOpenDungeonBuilder={() => setWorkspace('dungeon')}
+          importDungeonScrawl={importDungeonScrawl}
         />
       ) : mode === 'dm' ? (
         <DungeonMasterPortal
@@ -76,7 +74,7 @@ export function App() {
           redo={redo}
           canUndo={canUndo}
           canRedo={canRedo}
-          onOpenDungeonBuilder={() => setWorkspace('dungeon')}
+          importDungeonScrawl={importDungeonScrawl}
         />
       ) : (
         <PlayerViewer state={playerState} projectId={playerProjectId} updateProjectState={updateProjectState} />
@@ -85,7 +83,7 @@ export function App() {
   );
 }
 
-function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenProject, onRenameProject, onDeleteProject, onImportProject, onOpenDungeonBuilder }) {
+function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenProject, onRenameProject, onDeleteProject, onImportProject, importDungeonScrawl }) {
   const [name, setName] = useState('New Campaign');
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
@@ -95,6 +93,7 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
   const [importMessage, setImportMessage] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [isBookImportOpen, setIsBookImportOpen] = useState(false);
+  const [isScrawlImportOpen, setIsScrawlImportOpen] = useState(false);
   const [bookCampaignName, setBookCampaignName] = useState('');
   const [fiveEToolsBaseUrl, setFiveEToolsBaseUrl] = useState('https://5e.tools/');
 
@@ -138,7 +137,7 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
               <strong>Open a project</strong>
               <span>Projects are saved on this host machine and shared with connected players.</span>
             </div>
-            <button className="project-builder-button" onClick={onOpenDungeonBuilder}>Dungeon & Map Builder</button>
+            <button className="project-scrawl-button" onClick={() => setIsScrawlImportOpen(true)}>Import Dungeon Scrawl (.ds)</button>
             <label className="project-import-button">
               Import Campaign
               <input type="file" accept=".zip,application/zip" onChange={handleImportChange} disabled={isImporting} />
@@ -228,6 +227,13 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
             </div>
           </div>
         </div>
+      )}
+      {isScrawlImportOpen && (
+        <DungeonScrawlImporter
+          createCampaign
+          onImport={(map, options) => importDungeonScrawl(map, { ...options, createCampaign: true })}
+          onClose={() => setIsScrawlImportOpen(false)}
+        />
       )}
       {isBookImportOpen && (
         <div className="library-overlay" role="dialog" aria-modal="true" aria-label="Create campaign from 5e.tools">

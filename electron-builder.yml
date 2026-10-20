@@ -6,6 +6,7 @@ files:
   - desktop/**/*
   - dist/**/*
   - server.js
+  - src/lib/board.js
   - package.json
   - node_modules/**/*
 asar: true

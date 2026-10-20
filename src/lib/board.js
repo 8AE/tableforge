@@ -20,6 +20,7 @@ export const defaultLighting = {
   reveals: [],
   hiddenReveals: [],
   walls: [],
+  lights: [],
 };
 export const entityCapabilities = {
   token: { selectable: true, movable: true, deletable: true, editable: true, contextMenu: true },
@@ -116,6 +117,7 @@ export function migrateState(raw) {
           ...board.lighting,
           hiddenReveals: board.lighting?.hiddenReveals || [],
           walls: (board.lighting?.walls || []).map((wall) => normalizeWall(wall)),
+          lights: (board.lighting?.lights || []).map(normalizePointLight),
         },
         tokens: (board.tokens || []).map((token) => normalizeBoardToken(token)),
         drawings: (board.drawings || []).map((drawing) => normalizeDrawing(drawing)),
@@ -261,6 +263,7 @@ export function normalizeBoard(board = {}) {
       ...board.lighting,
       hiddenReveals: board.lighting?.hiddenReveals || [],
       walls: (board.lighting?.walls || []).map((wall) => normalizeWall(wall)),
+      lights: (board.lighting?.lights || []).map(normalizePointLight),
     },
     tokens: (board.tokens || []).map((token) => normalizeBoardToken(token)),
     drawings: (board.drawings || []).map((drawing) => normalizeDrawing(drawing)),
@@ -415,6 +418,7 @@ export function normalizeDoors(doors = []) {
       ...entityBase('door', door),
       id: door.id || uid('door'),
       type: 'door',
+      ...(door.source === 'dungeon-scrawl' ? { source: door.source } : {}),
       position: {
         x: Number(door.position?.x ?? door.x ?? 0),
         y: Number(door.position?.y ?? door.y ?? 0),
@@ -637,6 +641,10 @@ export function wallBounds(wall) {
 
 export function doorBounds(door) {
   if (!door?.position) return null;
+  if (door.source === 'dungeon-scrawl' && door.lightingSegment?.length === 2) {
+    const [a, b] = door.lightingSegment;
+    return { x: Math.min(a[0], b[0]) - 0.25, y: Math.min(a[1], b[1]) - 0.25, w: Math.abs(b[0] - a[0]) + 0.5, h: Math.abs(b[1] - a[1]) + 0.5 };
+  }
   return { x: door.position.x - 0.45, y: door.position.y - 0.45, w: 0.9, h: 0.9 };
 }
 
@@ -699,7 +707,10 @@ export function visionPolygonPoints(token, walls, tile, radiusFeet = token.visio
 
   const center = tokenCenter(token, board);
   const origin = { x: center.x * tile, y: center.y * tile };
-  const wallSegments = (walls || []).map((wall) => wallEndpoints(wall, tile));
+  const wallSegments = (walls || []).map((wall) => wallEndpoints(wall, tile)).filter((wall) => (
+    Math.max(wall.x1, wall.x2) >= origin.x - radius && Math.min(wall.x1, wall.x2) <= origin.x + radius
+    && Math.max(wall.y1, wall.y2) >= origin.y - radius && Math.min(wall.y1, wall.y2) <= origin.y + radius
+  ));
   const angles = [];
   const baseRayCount = 112;
 
@@ -725,6 +736,34 @@ export function visionPolygonPoints(token, walls, tile, radiusFeet = token.visio
       return `${origin.x + Math.cos(angle) * distance},${origin.y + Math.sin(angle) * distance}`;
     })
     .join(' ');
+}
+
+export function normalizePointLight(light = {}) {
+  const radiusFeet = Number.isFinite(light.radiusFeet) ? Math.max(0, Math.min(1000, light.radiusFeet)) : 20;
+  return {
+    ...light,
+    id: light.id || uid('light'),
+    x: Number.isFinite(light.x) ? light.x : 0,
+    y: Number.isFinite(light.y) ? light.y : 0,
+    name: String(light.name || 'Imported light').slice(0, 120),
+    radiusFeet,
+    brightFeet: Number.isFinite(light.brightFeet) ? Math.max(0, Math.min(radiusFeet, light.brightFeet)) : 0,
+    color: /^#[0-9a-f]{6}$/i.test(light.color || '') ? light.color : '#ffcc80',
+    intensity: Number.isFinite(light.intensity) ? Math.max(0, Math.min(1, light.intensity)) : 1,
+    visible: light.visible !== false,
+  };
+}
+
+export function pointLightPolygons(lights, walls, tile, board = {}) {
+  return (lights || []).map(normalizePointLight).filter((light) => light.visible && light.intensity > 0 && light.radiusFeet > 0).flatMap((light) => {
+    // visionPolygonPoints accepts a token's top-left cell; source lights are
+    // stored at their actual centre, including fractional-cell coordinates.
+    const origin = { x: light.x - 0.5, y: light.y - 0.5, size: 1 };
+    return [
+      { id: `source-dim-${light.id}`, tone: 'dim', color: light.color, intensity: light.intensity, points: visionPolygonPoints(origin, walls, tile, light.radiusFeet, board) },
+      ...(light.brightFeet > 0 ? [{ id: `source-bright-${light.id}`, tone: 'bright', color: light.color, intensity: light.intensity, points: visionPolygonPoints(origin, walls, tile, light.brightFeet, board) }] : []),
+    ];
+  });
 }
 
 function normalizeAngle(angle) {

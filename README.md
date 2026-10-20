@@ -20,6 +20,7 @@ The app is designed to run on one host machine. Projects are stored on that host
 - Resize the board background image by dragging it in background edit mode.
 - Create, rename, delete, and open projects that contain saved boards. Project names must be unique.
 - Create multiple saved boards and publish the active board to the player viewer.
+- Import Dungeon Scrawl `.ds` saves directly into a new campaign or as a new board, including map artwork, embedded images, light-blocking walls, interactive doors, and saved radial lights.
 - Place and move tokens on the active board grid, including standard 5 ft tokens and dedicated 50 ft hex tokens. Clicking with the token tool asks whether to create a new token or place one from the library on that cell.
 - Drag tokens smoothly by their center under the cursor, then snap to the nearest valid cell on release. Off-center clicks select without moving; Escape cancels a drag.
 - Edit selected tokens, including color and uploaded token artwork.
@@ -83,6 +84,10 @@ npm run preview
 
 ## Usage Notes
 
+- Use **Import Dungeon Scrawl (.ds)** on the project home screen, in the board drawer, or under **Board Setup**. Save your map with **File → Save** in [Dungeon Scrawl](https://app.dungeonscrawl.com/), choose the `.ds` file, review the preview, then import. A separate PNG export is not required.
+- Dungeon Scrawl imports support the current save format and standard square grids. Each cell becomes a 5 ft Tableforge cell. For a save containing several maps, select the map to import. The importer explains unsupported layers before saving; procedural hatching, brush strokes, custom fonts, and advanced textures may look different. See [format and compatibility notes](docs/dungeon-scrawl.md).
+- Dynamic lighting is enabled by default for imported dungeons. Saved light sources illuminate rooms and walls block sight. If the source map contains no lights, add a token with vision or disable lighting in the import dialog to show the whole map. **Board Setup → Imported Lights** controls imported light colours and radii.
+- Imported artwork is stored as a local PNG in the campaign, while walls, doors, and lights remain editable board data. Campaign export/import includes these assets. Existing boards remain available after removal of the standalone dungeon builder; its old library files are left on disk.
 - The DM must create or open a project before the player viewer shows a board.
 - The DM starts on the project home screen, opens one project at a time, and can return home with **Project home**.
 - Projects are saved on the host machine in `data/projects.json`.

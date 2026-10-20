@@ -14,6 +14,7 @@ import {
   isHexBoard,
   normalizeBackground,
   normalizeGrid,
+  pointLightPolygons,
   offsetEntity,
   offsetDrawing,
   revealBox,
@@ -162,8 +163,9 @@ export function BoardCanvas({
         Number(token.lightDimFeet) > 0 ? { id: `light-dim-${token.id}`, tone: 'dim', points: visionPolygonPoints(token, activeLightingWalls, tile, token.lightDimFeet, board) } : null,
       ].filter(Boolean));
   }, [activeLightingWalls, board.tokens, brightPolygons, dimPolygons, tile]);
-  const allBrightPolygons = useMemo(() => [...brightPolygons, ...lightPolygons.filter((item) => item.tone === 'bright')], [brightPolygons, lightPolygons]);
-  const allDimPolygons = useMemo(() => [...dimPolygons, ...lightPolygons], [dimPolygons, lightPolygons]);
+  const sourceLightPolygons = useMemo(() => pointLightPolygons(lighting.lights, activeLightingWalls, tile, board), [lighting.lights, activeLightingWalls, tile, board.grid]);
+  const allBrightPolygons = useMemo(() => [...brightPolygons, ...lightPolygons.filter((item) => item.tone === 'bright'), ...sourceLightPolygons.filter((item) => item.tone === 'bright')], [brightPolygons, lightPolygons, sourceLightPolygons]);
+  const allDimPolygons = useMemo(() => [...dimPolygons, ...lightPolygons, ...sourceLightPolygons], [dimPolygons, lightPolygons, sourceLightPolygons]);
   const visibleDoors = useMemo(() => {
     if (view === 'dm' || !lighting.enabled) return doors;
     return doors.filter((door) => pointIsInAnyPolygon({ x: door.position.x * tile, y: door.position.y * tile }, allDimPolygons));
@@ -433,7 +435,9 @@ export function BoardCanvas({
   const drawingAt = (point) => [...activeCanvasDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing));
   const crossLayerDrawingAt = (point) => ['token', 'gm'].includes(activeLayer) ? [...visibleDrawings].reverse().find((drawing) => isPointInDrawing(point, drawing)) : null;
   const wallAt = (point) => activeLayer === 'walls' ? [...lighting.walls].reverse().find((wall) => isPointNearWall(point, wall)) : null;
-  const doorAt = (point) => view === 'player' || activeLayer === 'walls' ? [...visibleDoors].reverse().find((door) => Math.hypot(point.px - door.position.x * tile, point.py - door.position.y * tile) <= tile * 0.45) : null;
+  const doorAt = (point) => view === 'player' || activeLayer === 'walls' ? [...visibleDoors].reverse().find((door) => door.source === 'dungeon-scrawl'
+    ? isPointNearWall({ x: point.px / tile, y: point.py / tile }, doorWall(door))
+    : Math.hypot(point.px - door.position.x * tile, point.py - door.position.y * tile) <= tile * 0.45) : null;
   const isSelected = (type, id) => selectedItems.some((item) => item.type === type && item.id === id);
 
   const onPointerDown = (event) => {
@@ -985,6 +989,7 @@ export function BoardCanvas({
                     key={`dim-${token.id}`}
                     points={token.points}
                     fill="black"
+                    fillOpacity={token.intensity ?? 1}
                   />
                 ))}
               </mask>
@@ -994,14 +999,14 @@ export function BoardCanvas({
               <mask id={`bright-mask-${board.id}`}>
                 <rect x="0" y="0" width={width} height={height} fill="white" />
                 {lighting.reveals.map((reveal) => renderRevealHole(reveal, tile))}
-                {allBrightPolygons.map((token) => <polygon key={`bright-${token.id}`} points={token.points} fill="black" />)}
+                {allBrightPolygons.map((token) => <polygon key={`bright-${token.id}`} points={token.points} fill="black" fillOpacity={token.intensity ?? 1} />)}
               </mask>
             </defs>
             {gridVisible && renderBoardGrid(board)}
             {displayDrawings.map((drawing) => renderDraggedGroupItem('drawing', drawing, renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id), boardObjectMotion.drawings[drawing.id])))}
             {boardObjectMotion.exiting.drawings.map((drawing) => renderDrawing(drawing, tile, board, null, false, { className: 'player-object-exit player-svg-motion' }, `exiting-drawing-${drawing.id}`))}
             {liveDrawing.map((drawing) => renderDrawing(drawing, tile, board, selected, isSelected('drawing', drawing.id)))}
-            {view === 'dm' && displayWalls.map((wall) => renderDraggedGroupItem('wall', wall, renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id))))}
+            {view === 'dm' && displayWalls.filter((wall) => wall.source !== 'dungeon-scrawl' || activeLayer === 'walls' || isSelected('wall', wall.id)).map((wall) => renderDraggedGroupItem('wall', wall, renderLightingWall(wall, tile, selected, false, isSelected('wall', wall.id))))}
             {displayDoors.map((door) => renderDraggedGroupItem('door', door, renderDoor(door, tile, view, isSelected('door', door.id), boardObjectMotion.doors[door.id])))}
             {boardObjectMotion.exiting.doors.map((door) => renderDoor(door, tile, view, false, { className: 'player-object-exit player-door-motion' }, `exiting-door-${door.id}`))}
             {liveMarquee && (
@@ -1017,6 +1022,7 @@ export function BoardCanvas({
             {liveShape && renderLiveShape(liveShape, tile, board)}
             {lighting.enabled && (
               <>
+                {sourceLightPolygons.filter((light) => light.tone === 'dim').map((light) => <polygon key={`tint-${light.id}`} points={light.points} fill={light.color} opacity={light.intensity * 0.18} />)}
                 <rect
                   className={view === 'dm' ? 'lighting-preview' : 'lighting-darkness'}
                   x="0"
@@ -1354,12 +1360,15 @@ function renderDoor(door, tile, view, isSelected = false, motion = {}, keyOverri
   const y = door.position.y * tile;
   const isOpen = door.state === 'open';
   const isLocked = door.state === 'locked' || door.isLocked;
-  const rotation = door.edge?.orientation === 'v' ? 90 : 0;
+  const [start, end] = door.lightingSegment || [[0, 0], [0, 0]];
+  const dx = end[0] - start[0], dy = end[1] - start[1];
+  const rotation = dx || dy ? Math.atan2(dy, dx) * 180 / Math.PI : door.edge?.orientation === 'v' ? 90 : 0;
+  const doorWidth = door.source === 'dungeon-scrawl' ? Math.max(10, Math.hypot(dx, dy) * tile) : 26;
   return (
     <g key={keyOverride || `door-${door.id}`} className={`door-icon door-${isLocked ? 'locked' : door.state} ${isSelected ? 'selected-door' : ''} ${motion.className || ''}`} style={motion.style} transform={`translate(${x} ${y}) rotate(${isOpen ? rotation + 28 : rotation})`}>
       <title>{isLocked && view === 'player' ? 'Locked' : `Door: ${door.state}`}</title>
-      <rect x="-13" y="-5" width="26" height="10" rx="3" />
-      <circle cx="8" cy="0" r="2.2" />
+      <rect x={-doorWidth / 2} y="-5" width={doorWidth} height="10" rx="3" />
+      <circle cx={doorWidth / 2 - 5} cy="0" r="2.2" />
     </g>
   );
 }

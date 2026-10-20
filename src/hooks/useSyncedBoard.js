@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CHANNEL_KEY, makeProject, migrateState } from '../lib/board';
 import { makeFiveEToolsMapBoard, normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
+import { makeDungeonScrawlBoard } from '../lib/dungeonScrawl';
+import { renderDungeonScrawlPng } from '../lib/dungeonScrawlImage';
 
 function isNewer(a, b) {
   return new Date(a?.updatedAt || 0).getTime() > new Date(b?.updatedAt || 0).getTime();
@@ -17,6 +19,8 @@ export function useSyncedBoard() {
   const channelRef = useRef(null);
   const saveTimerRef = useRef(null);
   const pendingSaveRef = useRef(null);
+  const saveInFlightRef = useRef(Promise.resolve());
+  const payloadRevisionRef = useRef(0);
   const projectsRef = useRef(projects);
   const selectedProjectIdRef = useRef(selectedProjectId);
 
@@ -51,8 +55,11 @@ export function useSyncedBoard() {
   }, [mergeProjects]);
 
   const fetchProjects = useCallback(async () => {
+    const revision = payloadRevisionRef.current;
     const response = await fetch('/api/projects');
-    applyProjectPayload(await response.json());
+    const payload = await response.json();
+    // A poll started before an import/save must not replace its newer result.
+    if (revision === payloadRevisionRef.current) applyProjectPayload(payload);
   }, [applyProjectPayload]);
 
   useEffect(() => {
@@ -73,31 +80,44 @@ export function useSyncedBoard() {
   }, [applyProjectPayload, fetchProjects]);
 
   const commitPayload = (payload) => {
+    payloadRevisionRef.current += 1;
     applyProjectPayload(payload);
     channelRef.current?.postMessage({ type: 'projects', payload });
   };
 
-  const saveProject = async (project) => {
-    pendingSaveRef.current = project.id;
-    const response = await fetch(`/api/projects/${project.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(project),
+  const saveProject = (project) => {
+    const save = async () => {
+      pendingSaveRef.current = project.id;
+      const response = await fetch(`/api/projects/${project.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(project),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setError(body.error || 'Unable to save project.');
+        return { ok: false, error: body.error || 'Unable to save project.' };
+      }
+      const payload = await response.json();
+      pendingSaveRef.current = null;
+      commitPayload(payload);
+      return { ok: true };
+    };
+    const promise = saveInFlightRef.current.then(save).catch((saveError) => {
+      setError(saveError.message || 'Unable to save project.');
+      return { ok: false, error: saveError.message || 'Unable to save project.' };
     });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      setError(body.error || 'Unable to save project.');
-      return;
-    }
-    const payload = await response.json();
-    pendingSaveRef.current = null;
-    commitPayload(payload);
+    saveInFlightRef.current = promise;
+    return promise;
   };
 
   const persistProject = (project) => {
     pendingSaveRef.current = project.id;
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(() => saveProject(project), 250);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      saveProject(project);
+    }, 250);
   };
 
   const importMapsIntoProject = async (project, maps, options = {}) => {
@@ -215,6 +235,44 @@ export function useSyncedBoard() {
       setFuture([]);
     }
     return result;
+  };
+
+  const importDungeonScrawl = async (map, options = {}) => {
+    setError('');
+    const projectId = options.createCampaign ? null : selectedProjectIdRef.current;
+    if (!options.createCampaign && !projectId) return { ok: false, error: 'Open a campaign before importing a map.' };
+    try {
+      // Render before changing campaign state. A failed image decode leaves the
+      // campaign untouched. Drain delayed saves before the atomic board import.
+      const image = await renderDungeonScrawlPng(map);
+      const project = projectsRef.current.find((item) => item.id === projectId);
+      const previousState = project?.state;
+      const pendingProject = projectsRef.current.find((item) => item.id === pendingSaveRef.current);
+      if (saveTimerRef.current) { window.clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+      const inFlight = await saveInFlightRef.current;
+      if (inFlight?.ok === false && !pendingProject) throw new Error(inFlight.error);
+      if (pendingProject) {
+        const saved = await saveProject(pendingProject);
+        if (!saved.ok) throw new Error(saved.error);
+      }
+      const board = makeDungeonScrawlBoard(map, '', options);
+      const form = new FormData();
+      form.append('file', image);
+      form.append('board', JSON.stringify(board));
+      if (projectId) form.append('projectId', projectId);
+      else form.append('campaignName', options.campaignName?.trim() || board.name);
+      const response = await fetch('/api/dungeon-scrawl/import', { method: 'POST', body: form });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Unable to save the imported map.');
+      pendingSaveRef.current = null;
+      commitPayload(payload);
+      setSelectedProjectId(payload.importedProjectId);
+      setPast((items) => previousState ? [...items.slice(-39), previousState] : []);
+      setFuture([]);
+      return { ok: true, assets: payload.assets, boardId: payload.importedBoardId };
+    } catch (importError) {
+      return { ok: false, error: importError.message || 'Unable to import this Dungeon Scrawl map.' };
+    }
   };
 
   const openProject = async (id) => {
@@ -365,6 +423,7 @@ export function useSyncedBoard() {
     deleteBoard,
     importProject,
     importFiveEToolsMaps,
+    importDungeonScrawl,
     publishProjectToPlayers,
     updateProjectState,
     undo,

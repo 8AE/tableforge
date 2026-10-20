@@ -174,7 +174,7 @@ export function Topbar({
               <div className="add-page-actions">
                 <button type="button" onClick={() => onAddBoard?.('square-5ft')}>5 ft Square Board</button>
                 <button type="button" onClick={() => onAddBoard?.('hex-50ft')}>50 ft Hex Board</button>
-                <button type="button" onClick={onImportBoard}>Import from Dungeon Builder</button>
+                <button type="button" onClick={onImportBoard}>Import Dungeon Scrawl (.ds)</button>
                 <button type="button" onClick={onImportFiveEToolsMap}>Import from 5e.tools</button>
               </div>
             </article>
