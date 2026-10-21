@@ -28,6 +28,7 @@ export function App() {
     deleteBoard,
     importProject,
     importFiveEToolsMaps,
+    importBestiaryToken,
     importDungeonScrawl,
     importInkarnate,
     publishProjectToPlayers,
@@ -73,6 +74,7 @@ export function App() {
           publishProjectToPlayers={publishProjectToPlayers}
           deleteBoard={deleteBoard}
           importFiveEToolsMaps={importFiveEToolsMaps}
+          importBestiaryToken={importBestiaryToken}
           undo={undo}
           redo={redo}
           canUndo={canUndo}
@@ -128,9 +130,9 @@ function ProjectLauncher({ projects, isLoading, error, onCreateProject, onOpenPr
     if (file) importSelectedFile(file, false);
   };
 
-  const createCampaignFromBook = (maps, { book, baseUrl, onProgress }) => {
+  const createCampaignFromBook = (maps, { book, ...options }) => {
     const campaignName = bookCampaignName.trim() || book?.name || 'New Campaign';
-    return onCreateProject(campaignName, { maps, baseUrl, onProgress });
+    return onCreateProject(campaignName, { maps, ...options });
   };
 
   return (

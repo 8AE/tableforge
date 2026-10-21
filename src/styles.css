@@ -1025,6 +1025,30 @@ input[type="range"] {
   font-size: 12px;
 }
 
+.import-feedback {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border, #4a5060);
+  border-left: 4px solid #6f9ac7;
+  border-radius: 6px;
+  background: #172433;
+  color: #edf1f5;
+  overflow-wrap: anywhere;
+}
+
+.import-feedback.error { background: #351e25; border-left-color: #f18585; }
+.import-feedback.success { background: #1a302b; border-left-color: #72c7a1; }
+.import-feedback.warning { background: #342b19; border-left-color: #edc46c; }
+.import-feedback-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; }
+.import-feedback-heading span, .import-feedback small { font-size: 12px; }
+.import-feedback p { margin: 8px 0; }
+.import-feedback small { display: block; }
+.fiveetools-region-option { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.fiveetools-region-option input { width: auto; }
+.asset-feedback-toast { position: fixed; bottom: 20px; right: 20px; width: min(460px, calc(100vw - 40px)); z-index: 10000; }
+.asset-feedback-toast .import-feedback { padding-top: 32px; box-shadow: 0 6px 24px #0008; }
+.asset-feedback-dismiss { position: absolute; right: 8px; top: 16px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+
 .asset-dropzone {
   min-height: 108px;
   place-items: center;

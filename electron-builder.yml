@@ -6,7 +6,10 @@ files:
   - desktop/**/*
   - dist/**/*
   - server.js
+  - server/**/*
   - src/lib/board.js
+  - src/lib/fiveETools.js
+  - src/lib/importErrors.js
   - package.json
   - node_modules/**/*
 asar: true

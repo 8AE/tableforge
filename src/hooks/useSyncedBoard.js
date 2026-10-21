@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CHANNEL_KEY, makeProject, migrateState } from '../lib/board';
-import { makeFiveEToolsMapBoard, normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
+import { importFiveEToolsSelection, normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
 import { makeDungeonScrawlBoard } from '../lib/dungeonScrawl';
 import { renderDungeonScrawlPng } from '../lib/dungeonScrawlImage';
+import { ImportError, requestImportJson } from '../lib/importErrors';
 import { makeInkarnateBoard } from '../lib/inkarnate';
 import { renderInkarnatePng } from '../lib/inkarnateImage';
 
@@ -122,75 +123,55 @@ export function useSyncedBoard() {
     }, 250);
   };
 
-  const importMapsIntoProject = async (project, maps, options = {}) => {
-    const mapList = Array.from(maps || []).filter((map) => map?.imageUrl);
-    if (!mapList.length) return { ok: false, error: 'Select at least one map to import.' };
-
+  const flushProjectSave = async (projectId) => {
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
+      const latest = projectsRef.current.find((item) => item.id === projectId);
+      if (latest) await saveProject(latest);
     }
-    pendingSaveRef.current = project.id;
+    const result = await saveInFlightRef.current;
+    if (result?.ok === false) throw new ImportError('CAMPAIGN_SAVE_FAILED', result.error || 'Save the campaign before importing.');
+  };
 
+  const importMapsIntoProject = async (project, maps, options = {}) => {
+    if (project) await flushProjectSave(project.id);
+    pendingSaveRef.current = project?.id || null;
     try {
-      let assets = Array.isArray(project.assets) ? project.assets : [];
-      const importedBoards = [];
-
-      for (let index = 0; index < mapList.length; index += 1) {
-        const map = mapList[index];
-        options.onProgress?.({ completed: index, total: mapList.length, map });
-        const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/assets/remote`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: map.imageUrl,
-            name: map.displayTitle || 'Imported Map',
-            category: 'map',
-          }),
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || `Unable to import ${map.displayTitle || 'map'}.`);
-        assets = body.assets || assets;
-        importedBoards.push(makeFiveEToolsMapBoard(map, body.asset.path));
-      }
-
-      const firstImportedBoard = importedBoards[0];
-      const replaceBoards = Boolean(options.replaceBoards);
-      const nextState = migrateState({
-        ...project.state,
-        fiveEToolsBaseUrl: normalizeFiveEToolsBaseUrl(options.baseUrl || project.state?.fiveEToolsBaseUrl),
-        boards: replaceBoards ? importedBoards : [...(project.state?.boards || []), ...importedBoards],
-        activeBoardId: firstImportedBoard.id,
-        playerBoardId: replaceBoards ? firstImportedBoard.id : project.state?.playerBoardId,
-      });
-      const updatedProject = {
-        ...project,
-        state: nextState,
-        assets,
-        updatedAt: new Date().toISOString(),
-      };
-      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedProject),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'Unable to save the imported maps.');
-
-      options.onProgress?.({ completed: mapList.length, total: mapList.length, map: null });
+      const result = await importFiveEToolsSelection({
+        projectId: project?.id, campaignName: options.campaignName, maps,
+        baseUrl: options.baseUrl, useRegionWalls: options.useRegionWalls,
+      }, { signal: options.signal, onProgress: options.onProgress });
       pendingSaveRef.current = null;
-      commitPayload(payload);
-      return { ok: true, assets, importedBoards, payload };
-    } catch (importError) {
+      commitPayload(result.payload);
+      return result;
+    } finally { pendingSaveRef.current = null; }
+  };
+
+  const importBestiaryToken = async (token, { signal } = {}) => {
+    const projectId = selectedProjectIdRef.current;
+    if (!projectId) throw new ImportError('CAMPAIGN_NOT_FOUND', 'Open a campaign before saving a token.');
+    await flushProjectSave(projectId);
+    pendingSaveRef.current = projectId;
+    try {
+      const result = await requestImportJson(`/api/projects/${encodeURIComponent(projectId)}/tokens/remote`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }), signal,
+      });
       pendingSaveRef.current = null;
-      const message = importError.message || 'Unable to import 5e.tools maps.';
-      setError(message);
-      return { ok: false, error: message };
-    }
+      commitPayload(result.payload);
+      return result;
+    } finally { pendingSaveRef.current = null; }
   };
 
   const createProject = async (name, options = {}) => {
     setError('');
+    if (options.maps?.length) {
+      const result = await importMapsIntoProject(null, options.maps, { ...options, campaignName: name.trim() || 'New Campaign' });
+      setSelectedProjectId(result.projectId);
+      setPast([]);
+      setFuture([]);
+      return result;
+    }
     const project = makeProject(name.trim() || 'New Campaign');
     if (options.baseUrl) {
       project.state.fiveEToolsBaseUrl = normalizeFiveEToolsBaseUrl(options.baseUrl);
@@ -206,18 +187,6 @@ export function useSyncedBoard() {
       return { ok: false, error: body.error || 'Unable to create project.' };
     }
     const payload = await response.json();
-    if (options.maps?.length) {
-      const result = await importMapsIntoProject(project, options.maps, {
-        baseUrl: options.baseUrl,
-        replaceBoards: true,
-        onProgress: options.onProgress,
-      });
-      if (!result.ok) return { ...result, projectCreated: true, projectId: project.id };
-      setSelectedProjectId(project.id);
-      setPast([]);
-      setFuture([]);
-      return { ...result, projectId: project.id };
-    }
     setSelectedProjectId(project.id);
     setPast([]);
     setFuture([]);
@@ -428,6 +397,7 @@ export function useSyncedBoard() {
     deleteBoard,
     importProject,
     importFiveEToolsMaps,
+    importBestiaryToken,
     importDungeonScrawl,
     importInkarnate,
     publishProjectToPlayers,

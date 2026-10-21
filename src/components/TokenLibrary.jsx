@@ -1,20 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Copy, Image, Pencil, Plus, RotateCw, Search, Trash2, X } from 'lucide-react';
-import { areTokenAndBoardCompatible, incompatibleTokenGridMessage, isHexBoard, normalizeLibraryToken, uid } from '../lib/board';
+import { areTokenAndBoardCompatible, incompatibleTokenGridMessage, isHexBoard, normalizeLibraryToken } from '../lib/board';
 
-export function normalizeFiveEToolsBaseUrl(baseUrl = 'https://5e.tools/') {
-  const trimmed = (baseUrl || '').trim() || 'https://5e.tools/';
-  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
-}
+import { searchFiveEToolsMonsters, searchOpen5eMonsters, monsterResultToLibraryToken } from '../lib/fiveEToolsMonsters';
+import { ImportError } from '../lib/importErrors';
+import { useImportAttempt } from '../hooks/useImportAttempt';
+import { ImportFeedback } from './ImportFeedback';
 
-async function fetchProxyJson(url) {
-  const response = await fetch(`/api/5etools?url=${encodeURIComponent(url)}`);
-  if (!response.ok) throw new Error(`Unable to load ${url}`);
-  return response.json();
-}
-
-const sizeNames = { T: 'Tiny', S: 'Small', M: 'Medium', L: 'Large', H: 'Huge', G: 'Gargantuan', C: 'Colossal' };
-const sizeToCells = { Tiny: 1, Small: 1, Medium: 1, Large: 2, Huge: 3, Gargantuan: 4, Colossal: 5 };
 const typeColors = {
   aberration: '#8b5cf6',
   beast: '#36d399',
@@ -34,109 +26,6 @@ const typeColors = {
 
 function monsterTypeColor(type) {
   return typeColors[String(type || '').toLowerCase()] || '#df5d52';
-}
-
-function parseDarkvisionFeet(senses) {
-  const text = Array.isArray(senses) ? senses.join(' ') : String(senses || '');
-  const match = text.match(/darkvision\s+(\d+)/i);
-  return match ? Number(match[1]) : 0;
-}
-
-function monsterResultToLibraryToken(result) {
-  return normalizeLibraryToken({
-    id: uid('library-token'),
-    label: result.name,
-    color: monsterTypeColor(result.type),
-    image: result.image || '',
-    layer: 'dm',
-    size: sizeToCells[result.sizeName] || 1,
-    visionFeet: result.visionFeet,
-    visionMode: result.visionFeet ? 'darkvision' : 'normal',
-    visionEnabled: Boolean(result.visionFeet),
-    meta: {
-      cr: result.cr,
-      type: result.type,
-      sizeName: result.sizeName,
-      ac: result.ac,
-      hp: result.hp,
-      source: result.source,
-      origin: result.origin,
-    },
-  });
-}
-
-function fiveEToolsMonsterResult(monster, baseUrl) {
-  const type = typeof monster.type === 'string' ? monster.type : monster.type?.type || '';
-  const size = Array.isArray(monster.size) ? monster.size[0] : monster.size;
-  const acEntry = Array.isArray(monster.ac) ? monster.ac[0] : monster.ac;
-  return {
-    key: `5etools-${monster.source}-${monster.name}`,
-    name: monster.name || 'Unknown',
-    cr: monster.cr == null ? '' : typeof monster.cr === 'object' ? monster.cr.cr || '' : String(monster.cr),
-    type,
-    sizeName: sizeNames[size] || 'Medium',
-    ac: typeof acEntry === 'number' ? String(acEntry) : acEntry?.ac != null ? String(acEntry.ac) : '',
-    hp: monster.hp?.average != null ? String(monster.hp.average) : '',
-    source: monster.source || '',
-    origin: '5e.tools',
-    visionFeet: parseDarkvisionFeet(monster.senses),
-    image: fiveEToolsTokenImage(baseUrl, monster),
-  };
-}
-
-function fiveEToolsTokenImage(baseUrl, monster) {
-  if (!monster.name || !monster.source) return '';
-  const source = encodeURIComponent(monster.source);
-  const name = encodeURIComponent(monster.name).replace(/'/g, '%27');
-  return `${normalizeFiveEToolsBaseUrl(baseUrl)}img/bestiary/tokens/${source}/${name}.webp`;
-}
-
-const FIVE_E_TOOLS_MIRROR = 'https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/';
-
-async function searchFiveEToolsMonsters(query, baseUrl) {
-  const normalizedBase = normalizeFiveEToolsBaseUrl(baseUrl);
-  let dataBase = normalizedBase;
-  let index;
-  try {
-    index = await fetchProxyJson(`${dataBase}data/bestiary/index.json`);
-  } catch (error) {
-    // 5e.tools blocks direct fetches; fall back to the public source mirror for data
-    // while keeping the configured base URL for token artwork.
-    dataBase = FIVE_E_TOOLS_MIRROR;
-    index = await fetchProxyJson(`${dataBase}data/bestiary/index.json`);
-  }
-  const files = Object.values(index).filter((file) => typeof file === 'string');
-  const matches = [];
-  for (const file of files) {
-    const data = await fetchProxyJson(`${dataBase}data/bestiary/${file}`);
-    for (const monster of data.monster || []) {
-      if (monster.name?.toLowerCase().includes(query)) matches.push(fiveEToolsMonsterResult(monster, normalizedBase));
-      if (matches.length >= 30) break;
-    }
-    if (matches.length >= 30) break;
-  }
-  return matches;
-}
-
-function open5eMonsterResult(monster) {
-  return {
-    key: `open5e-${monster.slug || monster.name}`,
-    name: monster.name || 'Unknown',
-    cr: monster.challenge_rating || '',
-    type: monster.type || '',
-    sizeName: monster.size || 'Medium',
-    ac: monster.armor_class != null ? String(monster.armor_class) : '',
-    hp: monster.hit_points != null ? String(monster.hit_points) : '',
-    source: monster.document__title || 'Open 5e',
-    origin: 'Open 5e',
-    visionFeet: parseDarkvisionFeet(monster.senses),
-    image: monster.img_main || '',
-  };
-}
-
-async function searchOpen5eMonsters(query) {
-  const data = await fetchProxyJson(`https://api.open5e.com/v1/monsters/?name__icontains=${encodeURIComponent(query)}&limit=30`);
-  return (data.results || []).map(open5eMonsterResult);
 }
 
 function metaLine(meta) {
@@ -226,7 +115,10 @@ export function TokenLibraryModal({
   const [source, setSource] = useState('5etools');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
-  const [searchError, setSearchError] = useState('');
+  const searchAttempts = useImportAttempt();
+  const saveAttempts = useImportAttempt();
+  const [savingKey, setSavingKey] = useState(null);
+  const [previewErrors, setPreviewErrors] = useState(() => new Set());
   const [isSearching, setIsSearching] = useState(false);
   const [savedKeys, setSavedKeys] = useState(() => new Set());
   const editingToken = tokenLibrary.find((token) => token.id === editingTokenId) || null;
@@ -251,28 +143,46 @@ export function TokenLibraryModal({
       .some((text) => String(text).toLowerCase().includes(searchText));
   });
 
-  const runSearch = async () => {
-    const trimmed = query.trim().toLowerCase();
-    if (!trimmed) return;
-    setSearchError('');
+  const clearSearch = () => {
+    searchAttempts.clear();
+    saveAttempts.clear();
+    setIsSearching(false);
     setResults([]);
-    setIsSearching(true);
-    try {
-      const matches = source === 'open5e'
-        ? await searchOpen5eMonsters(trimmed)
-        : await searchFiveEToolsMonsters(trimmed, fiveEToolsBaseUrl);
-      setResults(matches);
-      if (!matches.length) setSearchError('No matching monsters found.');
-    } catch (error) {
-      setSearchError(error.message || 'Unable to search for monsters.');
-    } finally {
-      setIsSearching(false);
-    }
+    setPreviewErrors(new Set());
   };
 
-  const saveResult = (result) => {
-    onAddLibraryToken(monsterResultToLibraryToken(result));
-    setSavedKeys((keys) => new Set([...keys, result.key]));
+  const runSearch = async () => {
+    if (isSearching || savingKey) return;
+    saveAttempts.clear();
+    const attempt = searchAttempts.begin(source === 'open5e' ? 'Search Open 5e' : 'Search 5etools bestiary');
+    const trimmed = query.trim().toLowerCase();
+    setResults([]);
+    setPreviewErrors(new Set());
+    if (!trimmed) { searchAttempts.fail(attempt, new ImportError('SEARCH_REQUIRED', 'Enter a monster name before searching.')); return; }
+    setIsSearching(true);
+    let notice = '';
+    try {
+      const options = { signal: attempt.controller.signal, onNotice: (message) => { notice = message; } };
+      const matches = source === 'open5e'
+        ? await searchOpen5eMonsters(trimmed, options)
+        : await searchFiveEToolsMonsters(trimmed, fiveEToolsBaseUrl, options);
+      if (!searchAttempts.isCurrent(attempt)) return;
+      setResults(matches);
+      searchAttempts.finish(attempt, `${matches.length ? `Found ${matches.length} monster${matches.length === 1 ? '' : 's'} (up to 30 shown).` : 'No matching monsters found. Try another name.'}${notice ? ` ${notice}` : ''}`, notice ? 'warning' : 'success');
+    } catch (error) { searchAttempts.fail(attempt, error); }
+    finally { if (searchAttempts.isCurrent(attempt)) setIsSearching(false); }
+  };
+
+  const saveResult = async (result) => {
+    if (savingKey) return;
+    const attempt = saveAttempts.begin(`Save ${result.name}`);
+    setSavingKey(result.key);
+    try {
+      await onAddLibraryToken(monsterResultToLibraryToken(result, monsterTypeColor(result.type)), { signal: attempt.controller.signal });
+      setSavedKeys((keys) => new Set([...keys, result.key]));
+      saveAttempts.finish(attempt, `${result.name} saved to this campaign${result.image ? ' with a local copy of its artwork' : ' (this entry has no token artwork)'}.`);
+    } catch (error) { saveAttempts.fail(attempt, error); }
+    finally { if (saveAttempts.isCurrent(attempt)) setSavingKey(null); }
   };
 
   return (
@@ -391,13 +301,13 @@ export function TokenLibraryModal({
           <div className="monster-search">
             <div className="monster-search-controls">
               <div className="source-toggle" role="group" aria-label="Monster source">
-                <button type="button" className={source === '5etools' ? 'active' : ''} onClick={() => setSource('5etools')}>5e.tools</button>
-                <button type="button" className={source === 'open5e' ? 'active' : ''} onClick={() => setSource('open5e')}>Open 5e</button>
+                <button type="button" className={source === '5etools' ? 'active' : ''} disabled={Boolean(savingKey)} onClick={() => { setSource('5etools'); clearSearch(); }}>5e.tools</button>
+                <button type="button" className={source === 'open5e' ? 'active' : ''} disabled={Boolean(savingKey)} onClick={() => { setSource('open5e'); clearSearch(); }}>Open 5e</button>
               </div>
               {source === '5etools' ? (
                 <label className="base-url-field">
                   5e.tools base URL
-                  <input value={fiveEToolsBaseUrl || 'https://5e.tools/'} onChange={(event) => onChangeFiveEToolsBaseUrl(event.target.value)} />
+                  <input value={fiveEToolsBaseUrl || 'https://5e.tools/'} disabled={Boolean(savingKey)} onChange={(event) => { onChangeFiveEToolsBaseUrl(event.target.value); clearSearch(); }} />
                 </label>
               ) : (
                 <p className="empty-note">Searches the public Open 5e API (api.open5e.com) — SRD and open-license monsters.</p>
@@ -409,15 +319,16 @@ export function TokenLibraryModal({
                     autoFocus
                     placeholder="Goblin, dragon, bandit..."
                     value={query}
-                    onChange={(event) => setQuery(event.target.value)}
+                    disabled={Boolean(savingKey)} onChange={(event) => { setQuery(event.target.value); clearSearch(); }}
                     onKeyDown={(event) => { if (event.key === 'Enter') runSearch(); }}
                   />
                 </label>
-                <button className="command" onClick={runSearch} disabled={isSearching}>
+                <button className="command" onClick={runSearch} disabled={isSearching || Boolean(savingKey)}>
                   {isSearching ? 'Searching...' : 'Search'}
                 </button>
               </div>
-              {searchError && <p className="form-error">{searchError}</p>}
+              <ImportFeedback feedback={searchAttempts.feedback} />
+              <ImportFeedback feedback={saveAttempts.feedback} />
             </div>
             <div className="token-table-wrap">
               {results.length > 0 && (
@@ -434,16 +345,17 @@ export function TokenLibraryModal({
                   </thead>
                   <tbody>
                     {results.map((result) => {
-                      const alreadySaved = savedKeys.has(result.key);
+                      const alreadySaved = savedKeys.has(result.key) || tokenLibrary.some((token) => token.meta?.importKey === result.key || (token.label === result.name && token.meta?.source === result.source && token.meta?.origin === result.origin));
                       return (
                         <tr key={result.key}>
                           <td>
                             <div className="token-cell">
-                              <span className={`library-token-preview ${result.image ? 'has-image' : ''}`} style={{ backgroundColor: result.image ? 'transparent' : monsterTypeColor(result.type) }}>
-                                {result.image ? <img src={result.image} alt="" loading="lazy" /> : result.name.slice(0, 2)}
+                              <span className={`library-token-preview ${result.image && !previewErrors.has(result.key) ? 'has-image' : ''}`} style={{ backgroundColor: result.image ? 'transparent' : monsterTypeColor(result.type) }}>
+                                {result.image && !previewErrors.has(result.key) ? <img src={`/api/5etools/image?url=${encodeURIComponent(result.image)}`} alt="" loading="lazy" onError={() => setPreviewErrors((keys) => new Set([...keys, result.key]))} /> : result.name.slice(0, 2)}
                               </span>
                               <div>
                                 <strong>{result.name}</strong>
+                                {previewErrors.has(result.key) && <small>Artwork preview unavailable. Save will retry the download and report the cause.</small>}
                                 <span>{[result.sizeName, result.type].filter(Boolean).join(' ')}{result.visionFeet ? ` · darkvision ${result.visionFeet} ft` : ''}</span>
                               </div>
                             </div>
@@ -457,10 +369,10 @@ export function TokenLibraryModal({
                               <button
                                 className={alreadySaved ? 'command' : 'command accent'}
                                 title={alreadySaved ? 'Already saved to the library' : 'Save this monster into the project token library'}
-                                disabled={alreadySaved}
+                                disabled={alreadySaved || Boolean(savingKey)}
                                 onClick={() => saveResult(result)}
                               >
-                                <Plus size={15} /> {alreadySaved ? 'Saved' : 'Save'}
+                                <Plus size={15} /> {alreadySaved ? 'Saved' : savingKey === result.key ? 'Saving...' : 'Save'}
                               </button>
                             </div>
                           </td>
@@ -470,7 +382,7 @@ export function TokenLibraryModal({
                   </tbody>
                 </table>
               )}
-              {!results.length && !isSearching && !searchError && (
+              {!results.length && !isSearching && !searchAttempts.feedback && (
                 <div className="library-empty">
                   <strong>Search for monsters</strong>
                   <span>Results show CR, AC, HP, and source so you can pick the right stat block before saving it.</span>

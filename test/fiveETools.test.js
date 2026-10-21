@@ -64,7 +64,7 @@ test('flattens maps into searchable campaign and chapter records', () => {
   assert.ok(maps.every((map) => map.searchText.includes('cult strikes back')));
 });
 
-test('creates a fitted board with inherited map walls and source metadata', () => {
+test('keeps source regions as metadata and creates estimated walls only when requested', () => {
   const [map] = getFiveEToolsMapBooks(mapCatalog, 'https://5e.tools/')[0].maps;
   const dimensions = getFiveEToolsMapBoardDimensions(map);
   assert.deepEqual(dimensions, { columns: 10, rows: 8 });
@@ -74,7 +74,11 @@ test('creates a fitted board with inherited map walls and source metadata', () =
   assert.equal(board.name, 'Dragon Hatchery');
   assert.equal(board.background.src, '/api/projects/project-1/assets/images/map.webp');
   assert.equal(board.background.fitToBoard, true);
-  assert.equal(board.lighting.walls.length, 4);
+  assert.equal(board.lighting.walls.length, 0);
+  assert.equal(board.fiveETools.mapRegions.length, 1);
+  const estimated = makeFiveEToolsMapBoard(map, '/map.webp', { useRegionWalls: true });
+  assert.equal(estimated.lighting.walls.length, 4);
+  assert.ok(estimated.lighting.walls.every((wall) => wall.estimated));
   assert.deepEqual(board.tokens, []);
   assert.deepEqual(board.drawings, []);
   assert.equal(board.fiveETools.sourceId, 'RoT');

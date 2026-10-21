@@ -8,7 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { ZipArchive } from 'archiver';
 import multer from 'multer';
 import unzipper from 'unzipper';
-import { makeProject, normalizeBoard } from './src/lib/board.js';
+import { makeProject, normalizeBoard, normalizeLibraryToken } from './src/lib/board.js';
+import { makeFiveEToolsMapBoard, normalizeFiveEToolsBaseUrl } from './src/lib/fiveETools.js';
+import { ImportError } from './src/lib/importErrors.js';
+import { fetchRemoteJson, fetchRemoteImage, remoteErrorBody } from './server/remoteContent.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -136,13 +139,6 @@ function isAllowedAsset(file, bucket) {
   return false;
 }
 
-function extensionForMimeType(mimeType) {
-  if (mimeType === 'image/png') return '.png';
-  if (mimeType === 'image/jpeg') return '.jpg';
-  if (mimeType === 'image/webp') return '.webp';
-  return '';
-}
-
 function mimeTypeForExtension(extension) {
   if (extension === '.png') return 'image/png';
   if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
@@ -169,7 +165,7 @@ function remoteAssetOriginalName(displayName, remotePathname, extension) {
 async function saveProjectAsset(project, file, fields = {}, { persist = true } = {}) {
   const bucket = getAssetBucket(file, fields.assetType);
   if (!bucket || !isAllowedAsset(file, bucket)) {
-    const error = new Error('Unsupported asset format.');
+    const error = new ImportError('ASSET_UNSUPPORTED_FORMAT', 'Unsupported asset format. Use PNG, JPEG, WebP, MP3, WAV, MP4, WebM, or MOV.');
     error.status = 400;
     throw error;
   }
@@ -215,10 +211,10 @@ function uploadProjectAssetFile(request, response, next) {
       return;
     }
     if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
-      response.status(413).json({ error: 'Asset is larger than 1 GB.' });
+      response.status(413).json(remoteErrorBody(new ImportError('ASSET_TOO_LARGE', 'Asset is larger than 1 GB. Choose a smaller file.')));
       return;
     }
-    response.status(400).json({ error: error.message || 'Unable to upload asset.' });
+    response.status(400).json(remoteErrorBody(new ImportError('ASSET_UPLOAD_FAILED', error.message || 'Unable to upload asset. Retry the file.')));
   });
 }
 
@@ -721,54 +717,131 @@ app.post('/api/projects/:projectId/assets', uploadProjectAssetFile, async (reque
     const data = await saveProjectAsset(project, request.file, request.body);
     response.status(201).json(data);
   } catch (error) {
-    response.status(error.status || 400).json({ error: error.message || 'Unable to save asset.' });
+    response.status(error.status || 400).json(remoteErrorBody(error));
   } finally {
     if (uploadedDir) await fs.rm(uploadedDir, { recursive: true, force: true }).catch(() => {});
   }
 });
 
+function remoteRequestSignal(response) {
+  const controller = new AbortController();
+  response.on('close', () => { if (!response.writableEnded) controller.abort(); });
+  return controller.signal;
+}
+
+async function downloadProjectImage(project, url, name, category, signal) {
+  const image = await fetchRemoteImage(url, { signal });
+  return saveProjectAsset(project, {
+    originalname: remoteAssetOriginalName(name, new URL(image.url).pathname, image.extension),
+    mimetype: image.mimeType, size: image.buffer.length, buffer: image.buffer,
+  }, { name, category, assetType: 'image' }, { persist: false });
+}
+
+async function removeImportedAssets(project, assets) {
+  await Promise.all(assets.map((asset) => fs.rm(path.join(projectAssetDir(project.id, asset.bucket), asset.filename), { force: true })));
+}
+
 app.post('/api/projects/:projectId/assets/remote', async (request, response) => {
+  let created;
+  let project;
   try {
-    const project = await readProject(request.params.projectId);
-    if (!project) {
-      response.status(404).json({ error: 'Project not found.' });
-      return;
-    }
-
-    const target = new URL(String(request.body.url || ''));
-    if (!['http:', 'https:'].includes(target.protocol)) {
-      response.status(400).json({ error: 'Remote asset URL must use http or https.' });
-      return;
-    }
-
-    const upstream = await fetch(target);
-    if (!upstream.ok) {
-      response.status(upstream.status).json({ error: `Unable to load ${target.href}` });
-      return;
-    }
-
-    const upstreamMimeType = upstream.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || '';
-    const extension = path.extname(target.pathname).toLowerCase() || extensionForMimeType(upstreamMimeType);
-    const originalName = remoteAssetOriginalName(request.body.name, target.pathname, extension);
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-    if (buffer.length > 50 * 1024 * 1024) {
-      response.status(413).json({ error: 'Remote asset is larger than 50 MB.' });
-      return;
-    }
-
-    const data = await saveProjectAsset(
-      project,
-      {
-        originalname: originalName,
-        mimetype: upstreamMimeType,
-        size: buffer.length,
-        buffer,
-      },
-      { name: request.body.name, category: request.body.category || 'map', assetType: 'image' },
-    );
-    response.status(201).json(data);
+    project = await readProject(request.params.projectId);
+    if (!project) throw new ImportError('CAMPAIGN_NOT_FOUND', 'Open the campaign again before importing.', { status: 404 });
+    const media = await downloadProjectImage(project, request.body.url, request.body.name, request.body.category || 'map', remoteRequestSignal(response));
+    created = media.asset;
+    const latest = await readProject(project.id);
+    if (!latest) throw new ImportError('CAMPAIGN_NOT_FOUND', 'The campaign was removed during the import.', { status: 404 });
+    const assets = [...latest.assets, created];
+    await writeProject({ ...latest, assets });
+    response.status(201).json({ asset: created, assets });
   } catch (error) {
-    response.status(error.status || 400).json({ error: error.message || 'Unable to import remote asset.' });
+    if (created) await removeImportedAssets(project, [created]).catch(() => {});
+    if (!response.destroyed) response.status(error.status || 500).json(remoteErrorBody(error));
+  }
+});
+
+// Stream download progress, then commit the complete selection once. A failed
+// map must not leave an empty campaign or orphan assets behind on retry.
+app.post('/api/5etools/import', async (request, response) => {
+  const signal = remoteRequestSignal(response);
+  const createdAssets = [];
+  let project;
+  let isNew = false;
+  let committed = false;
+  const emit = (event) => { if (!response.destroyed) response.write(`${JSON.stringify(event)}\n`); };
+  try {
+    const maps = request.body.maps;
+    if (!Array.isArray(maps) || !maps.length || maps.length > 500 || maps.some((map) => !map || typeof map.imageUrl !== 'string' || !map.imageUrl)) throw new ImportError('INVALID_MAP_SELECTION', 'Select between 1 and 500 maps with valid image URLs.', { status: 400 });
+    const baseUrl = normalizeFiveEToolsBaseUrl(request.body.baseUrl);
+    if (request.body.projectId) {
+      project = await readProject(request.body.projectId);
+      if (!project) throw new ImportError('CAMPAIGN_NOT_FOUND', 'Open the campaign again before importing.', { status: 404 });
+    } else {
+      const name = String(request.body.campaignName || 'Imported Campaign').trim().slice(0, 120) || 'Imported Campaign';
+      if ((await readProjects()).projects.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) throw new ImportError('CAMPAIGN_NAME_EXISTS', 'A campaign with this name already exists. Choose another name or import from inside that campaign.', { status: 409 });
+      project = makeProject(name);
+      isNew = true;
+    }
+    response.setHeader('Content-Type', 'application/x-ndjson');
+    response.setHeader('Cache-Control', 'no-store');
+    const boards = [];
+    for (const [index, map] of maps.entries()) {
+      emit({ type: 'progress', completed: index, total: maps.length, map: { displayTitle: map.displayTitle } });
+      let media;
+      try { media = await downloadProjectImage(project, map.imageUrl, map.displayTitle || 'Imported Map', 'map', signal); }
+      catch (error) { error.message = `${map.displayTitle || 'Map'}: ${error.message} No maps from this attempt were saved.`; throw error; }
+      createdAssets.push(media.asset);
+      boards.push(makeFiveEToolsMapBoard(map, media.asset.path, { useRegionWalls: Boolean(request.body.useRegionWalls) }));
+    }
+    signal.throwIfAborted();
+    const latest = isNew ? project : await readProject(project.id);
+    if (!latest) throw new ImportError('CAMPAIGN_NOT_FOUND', 'The campaign was removed during the import. No maps were saved.', { status: 404 });
+    if (isNew && (await readProjects()).projects.some((entry) => entry.name.toLowerCase() === project.name.toLowerCase())) throw new ImportError('CAMPAIGN_NAME_EXISTS', 'A campaign with this name was created during the import. Choose another name.', { status: 409 });
+    const saved = await writeProject({
+      ...latest, assets: [...(latest.assets || []), ...createdAssets], updatedAt: new Date().toISOString(),
+      state: { ...latest.state, fiveEToolsBaseUrl: baseUrl, boards: isNew ? boards : [...latest.state.boards, ...boards], activeBoardId: boards[0].id, playerBoardId: isNew ? boards[0].id : latest.state.playerBoardId },
+    });
+    if (isNew) await writeOpenProjectId(saved.id);
+    committed = true;
+    emit({ type: 'complete', payload: await readProjects(), projectId: saved.id, assets: saved.assets, importedBoards: boards });
+    response.end();
+  } catch (error) {
+    if (!committed && project) {
+      if (isNew) await fs.rm(projectDir(project.id), { recursive: true, force: true }).catch(() => {});
+      else await removeImportedAssets(project, createdAssets).catch(() => {});
+    }
+    if (response.destroyed) return;
+    const body = remoteErrorBody(error);
+    if (response.headersSent) { emit({ type: 'error', ...body }); response.end(); }
+    else response.status(error.status || 400).json(body);
+  }
+});
+
+app.post('/api/projects/:projectId/tokens/remote', async (request, response) => {
+  let project;
+  let asset;
+  let committed = false;
+  try {
+    project = await readProject(request.params.projectId);
+    if (!project) throw new ImportError('CAMPAIGN_NOT_FOUND', 'Open the campaign again before saving this token.', { status: 404 });
+    if (typeof request.body.token?.label !== 'string' || !request.body.token.label.trim()) throw new ImportError('INVALID_TOKEN', 'Choose a monster before saving a token.', { status: 400 });
+    const token = normalizeLibraryToken(request.body.token);
+    const signal = remoteRequestSignal(response);
+    if (token.image) {
+      const media = await downloadProjectImage(project, token.image, token.label, 'token', signal);
+      asset = media.asset;
+      token.image = asset.path;
+    }
+    signal.throwIfAborted();
+    const latest = await readProject(project.id);
+    if (!latest) throw new ImportError('CAMPAIGN_NOT_FOUND', 'The campaign was removed during the import.', { status: 404 });
+    if (token.meta?.importKey && latest.state.tokenLibrary?.some((entry) => entry.meta?.importKey === token.meta.importKey || (entry.label === token.label && entry.meta?.source === token.meta.source && entry.meta?.origin === token.meta.origin))) throw new ImportError('TOKEN_ALREADY_SAVED', 'This monster is already in the token library. Open Saved Tokens to use it.', { status: 409 });
+    const saved = await writeProject({ ...latest, assets: [...latest.assets, ...(asset ? [asset] : [])], updatedAt: new Date().toISOString(), state: { ...latest.state, tokenLibrary: [...(latest.state.tokenLibrary || []), token] } });
+    committed = true;
+    response.status(201).json({ payload: await readProjects(), assets: saved.assets, token });
+  } catch (error) {
+    if (asset && !committed) await removeImportedAssets(project, [asset]).catch(() => {});
+    if (!response.destroyed) response.status(error.status || 500).json(remoteErrorBody(error));
   }
 });
 
@@ -787,20 +860,20 @@ app.get('/api/projects/:projectId/assets/:bucket/:filename', async (request, res
 
 app.get('/api/5etools', async (request, response) => {
   try {
-    const target = new URL(String(request.query.url || ''));
-    if (!['http:', 'https:'].includes(target.protocol)) {
-      response.status(400).json({ error: '5e.tools URL must use http or https.' });
-      return;
-    }
-    const upstream = await fetch(target);
-    if (!upstream.ok) {
-      response.status(upstream.status).json({ error: `Unable to load ${target.href}` });
-      return;
-    }
-    const data = await upstream.json();
-    response.json(data);
-  } catch {
-    response.status(400).json({ error: 'Unable to load 5e.tools JSON. Check the base URL and data files.' });
+    response.setHeader('Cache-Control', 'no-store');
+    response.json(await fetchRemoteJson(request.query.url, { signal: remoteRequestSignal(response) }));
+  } catch (error) {
+    if (!response.destroyed) response.status(error.status || 500).json(remoteErrorBody(error));
+  }
+});
+
+app.get('/api/5etools/image', async (request, response) => {
+  try {
+    const image = await fetchRemoteImage(request.query.url, { signal: remoteRequestSignal(response) });
+    response.setHeader('Cache-Control', 'no-store');
+    response.type(image.mimeType).send(image.buffer);
+  } catch (error) {
+    if (!response.destroyed) response.status(error.status || 500).json(remoteErrorBody(error));
   }
 });
 

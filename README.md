@@ -95,6 +95,7 @@ npm run preview
 - Projects are saved on the host machine in `data/projects.json`.
 - Existing boards use the standard 5 ft square grid. New boards can be created as either 5 ft square grids or 50 ft hex grids from the board drawer.
 - Use **Create from 5e.tools campaign** on the project launcher, or **Import from 5e.tools** inside an open project, to select a book and import its chosen DM and player maps as boards.
+- For a local 5etools installation, enter its site root (for example `http://localhost:5050/`). Map and bestiary artwork is saved in the campaign. Import feedback shows each attempt's time and error code. Campaign imports contain maps; adventure text and encounters are not included. See [5etools import and troubleshooting notes](docs/5etools-imports.md).
 - 50 ft hex boards render hexagon outlines and are intended for ship combat, air combat, and other large-scale scenes.
 - 50 ft hex tokens are a separate token type and occupy one 50 ft hex cell by default.
 - Use **Show active board to players** in the DM portal to transition the player viewer to a different board.

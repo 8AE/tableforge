@@ -42,9 +42,11 @@ import { TokenCreateModal, TokenLibraryModal } from './TokenLibrary';
 import { areTokenAndBoardCompatible, boardGridLabel, boxesOverlap, defaultLighting, getBoard, getBoardEntity, GRID_HEX_50FT, incompatibleTokenGridMessage, isHexBoard, makeBoard, normalizeDoors, normalizeLibraryToken, normalizeWall, offsetEntity, offsetDrawing, revealBox, tokenFootprint, uid, updateActiveBoard } from '../lib/board';
 import { InkarnateImporter } from './InkarnateImporter';
 import { DungeonScrawlImporter } from './DungeonScrawlImporter';
-import { normalizeFiveEToolsBaseUrl } from '../lib/fiveETools';
+import { requestImportJson, ImportError } from '../lib/importErrors';
+import { useImportAttempt } from '../hooks/useImportAttempt';
+import { ImportFeedback } from './ImportFeedback';
 
-export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, importFiveEToolsMaps, undo, redo, canUndo, canRedo, importDungeonScrawl, importInkarnate }) {
+export function DungeonMasterPortal({ state, projects = [], openProjectId, setState, leaveProject, publishProjectToPlayers, deleteBoard, importFiveEToolsMaps, importBestiaryToken, undo, redo, canUndo, canRedo, importDungeonScrawl, importInkarnate }) {
   const [tool, setTool] = useState('select');
   const [activeLayer, setActiveLayer] = useState('token');
   const [layerNotice, setLayerNotice] = useState('');
@@ -71,7 +73,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   const [vehicleImageAdjustTokenId, setVehicleImageAdjustTokenId] = useState(null);
   const [assets, setAssets] = useState([]);
   const [assetCategory, setAssetCategory] = useState('token');
-  const [assetError, setAssetError] = useState('');
+  const assetAttempts = useImportAttempt();
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
   const [mapImportKind, setMapImportKind] = useState(false);
   const MapImporter = mapImportKind === 'inkarnate' ? InkarnateImporter : DungeonScrawlImporter;
@@ -251,15 +253,13 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
   };
   const fetchProjectAssets = async () => {
     if (!openProjectId) return;
+    const attempt = assetAttempts.begin('Load campaign assets');
     try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets`);
-      if (!response.ok) throw new Error('Unable to load project assets.');
-      const data = await response.json();
+      const data = await requestImportJson(`/api/projects/${encodeURIComponent(openProjectId)}/assets`, { signal: attempt.controller.signal });
+      if (!assetAttempts.isCurrent(attempt)) return;
       setAssets(data.assets || []);
-      setAssetError('');
-    } catch (error) {
-      setAssetError(error.message || 'Unable to load project assets.');
-    }
+      assetAttempts.clear();
+    } catch (error) { assetAttempts.fail(attempt, error); }
   };
 
   useEffect(() => {
@@ -282,49 +282,37 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     form.append('file', file);
     form.append('category', category);
     form.append('assetType', assetTypeForFile(file));
-    const response = await fetch(`/api/projects/${encodeURIComponent(openProjectId)}/assets`, {
-      method: 'POST',
-      body: form,
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || `Unable to upload ${file.name}.`);
-    }
-    const data = await response.json();
+    const data = await requestImportJson(`/api/projects/${encodeURIComponent(openProjectId)}/assets`, { method: 'POST', body: form });
     setAssets(data.assets || []);
     return data.asset;
   };
 
   const uploadProjectAssets = async (files) => {
     const fileList = Array.from(files || []);
-    if (!openProjectId || !fileList.length) return;
-    setAssetError('');
+    if (!openProjectId || !fileList.length || isUploadingAsset) return;
+    const attempt = assetAttempts.begin('Upload campaign assets');
     setIsUploadingAsset(true);
+    let completed = 0;
     try {
-      for (const file of fileList) {
-        await uploadProjectAsset(file, assetCategory);
-      }
+      for (const file of fileList) { await uploadProjectAsset(file, assetCategory); completed++; }
+      assetAttempts.finish(attempt, `Saved ${completed} asset${completed === 1 ? '' : 's'} to this campaign.`);
     } catch (error) {
-      setAssetError(error.message || 'Unable to upload asset.');
-    } finally {
-      setIsUploadingAsset(false);
-    }
+      assetAttempts.fail(attempt, new ImportError(error.code || 'ASSET_UPLOAD_FAILED', `${completed} of ${fileList.length} files saved. ${error.message}`, { requestId: error.requestId }));
+    } finally { setIsUploadingAsset(false); }
   };
 
   const uploadAssetForUse = async (event, category, onAssetReady) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
-    setAssetError('');
+    if (!file || isUploadingAsset) return;
+    const attempt = assetAttempts.begin(`Upload ${file.name}`);
     setIsUploadingAsset(true);
     try {
       const asset = await uploadProjectAsset(file, category);
       if (asset) onAssetReady(asset);
-    } catch (error) {
-      setAssetError(error.message || 'Unable to upload asset.');
-    } finally {
-      setIsUploadingAsset(false);
-    }
+      assetAttempts.finish(attempt, `${file.name} saved to this campaign.`);
+    } catch (error) { assetAttempts.fail(attempt, error); }
+    finally { setIsUploadingAsset(false); }
   };
 
   const requestNewToken = (cell) => {
@@ -420,8 +408,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   const importFiveEToolsMapSelection = async (maps, options) => {
     const result = await importFiveEToolsMaps(maps, {
-      baseUrl: options.baseUrl,
-      onProgress: options.onProgress,
+      ...options,
     });
     if (result.ok) {
       setAssets(result.assets || []);
@@ -846,6 +833,12 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
 
   return (
     <>
+      {assetAttempts.feedback && (
+        <div className="asset-feedback-toast">
+          <button className="asset-feedback-dismiss" aria-label="Dismiss asset message" onClick={assetAttempts.clear}><X size={16} /></button>
+          <ImportFeedback feedback={assetAttempts.feedback} />
+        </div>
+      )}
       <section className={`workspace ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={sidebarStyle}>
         <Topbar
           board={board}
@@ -1039,9 +1032,8 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
             <Upload size={18} />
             <span>{isUploadingAsset ? 'Uploading...' : 'Drop files or browse'}</span>
             <small>.png, .jpeg, .webp, .mp4, .webm, .mov, .mp3, .wav</small>
-            <input type="file" multiple accept=".png,.jpg,.jpeg,.webp,.mp4,.webm,.mov,.mp3,.wav,image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav" onChange={(event) => uploadProjectAssets(event.target.files)} />
+            <input type="file" multiple accept=".png,.jpg,.jpeg,.webp,.mp4,.webm,.mov,.mp3,.wav,image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav" disabled={isUploadingAsset} onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; uploadProjectAssets(files); }} />
           </label>
-          {assetError && <p className="form-error">{assetError}</p>}
           <div className="project-asset-grid">
             {assets.map((asset) => (
               <div className="project-asset-card" key={asset.id}>
@@ -1490,7 +1482,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onImportToken={(libraryToken) => importLibraryToken(libraryToken, libraryMode === 'pick' ? pendingTokenCell : null)}
           onUpdateToken={updateLibraryToken}
           onDeleteToken={deleteLibraryToken}
-          onAddLibraryToken={(libraryToken) => updateTokenLibrary((items) => [...items, libraryToken])}
+          onAddLibraryToken={async (libraryToken, options) => {
+            const result = await importBestiaryToken(libraryToken, options);
+            setAssets(result.assets || []);
+            return result;
+          }}
           onClose={() => { setLibraryMode(null); setPendingTokenCell(null); }}
         />
       )}

@@ -1,26 +1,76 @@
 import { defaultLighting, makeBoard } from './board.js';
+import { ImportError, readImportResponse, requestImportJson } from './importErrors.js';
 
 const DEFAULT_BASE_URL = 'https://5e.tools/';
 const MAP_TYPES = new Set(['map', 'mapPlayer']);
 
 export function normalizeFiveEToolsBaseUrl(baseUrl = DEFAULT_BASE_URL) {
   const trimmed = String(baseUrl || '').trim() || DEFAULT_BASE_URL;
-  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+  let url;
+  try { url = new URL(trimmed); } catch { throw new ImportError('INVALID_URL', 'Enter the 5etools site URL, for example http://localhost:5050/.'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new ImportError('INVALID_URL', 'The 5etools URL must use http:// or https:// without embedded login credentials.');
+  url.search = ''; url.hash = '';
+  url.pathname = url.pathname.replace(/\/[^/]+\.html$/i, '/');
+  if (!url.pathname.endsWith('/')) url.pathname += '/';
+  return url.href;
 }
 
-export async function fetchFiveEToolsJson(url) {
-  const response = await fetch(`/api/5etools?url=${encodeURIComponent(url)}`);
-  if (!response.ok) throw new Error(`Unable to load ${url}`);
-  return response.json();
+export function fetchFiveEToolsJson(url, options = {}) {
+  return requestImportJson(`/api/5etools?url=${encodeURIComponent(url)}`, options);
 }
 
-export async function fetchFiveEToolsMaps(baseUrl) {
+export const FIVE_E_TOOLS_MIRROR = 'https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/';
+
+export async function fetchFiveEToolsData(baseUrl, path, { signal, onNotice } = {}) {
   const normalizedBaseUrl = normalizeFiveEToolsBaseUrl(baseUrl);
   try {
-    return await fetchFiveEToolsJson(`${normalizedBaseUrl}data/generated/gendata-maps.json`);
-  } catch {
-    return fetchFiveEToolsJson('https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/data/generated/gendata-maps.json');
+    return { data: await fetchFiveEToolsJson(`${normalizedBaseUrl}${path}`, { signal }), dataBase: normalizedBaseUrl };
+  } catch (error) {
+    // A custom installation must never quietly return somebody else's catalog.
+    if (signal?.aborted || normalizedBaseUrl !== DEFAULT_BASE_URL) throw error;
+    const data = await fetchFiveEToolsJson(`${FIVE_E_TOOLS_MIRROR}${path}`, { signal });
+    onNotice?.('5e.tools could not be reached. Data was loaded from its public source mirror; artwork still uses your configured site.');
+    return { data, dataBase: FIVE_E_TOOLS_MIRROR };
   }
+}
+
+export async function fetchFiveEToolsMaps(baseUrl, options) {
+  const { data } = await fetchFiveEToolsData(baseUrl, 'data/generated/gendata-maps.json', options);
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Object.values(data).every((source) => Array.isArray(source?.chapters) && source.chapters.every((chapter) => Array.isArray(chapter.images)))) {
+    throw new ImportError('INVALID_MAP_CATALOG', 'The response is not a 5etools map catalog. Update the source installation and reload the catalog.');
+  }
+  return data;
+}
+
+export async function importFiveEToolsSelection(selection, { signal, onProgress } = {}) {
+  let response;
+  try { response = await fetch('/api/5etools/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(selection), signal }); }
+  catch (error) {
+    if (signal?.aborted) throw error;
+    throw new ImportError('HOST_UNREACHABLE', 'Cannot reach the Tableforge host. Check that it is running and retry.');
+  }
+  if (!response.ok) return readImportResponse(response);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      pending += decoder.decode(value, { stream: !done });
+      const lines = pending.split('\n');
+      pending = lines.pop();
+      for (const line of lines.filter(Boolean)) {
+        const event = JSON.parse(line);
+        if (event.type === 'progress') onProgress?.(event);
+        if (event.type === 'error') throw new ImportError(event.code, event.error, event);
+        if (event.type === 'complete') return { ok: true, ...event };
+      }
+      if (done) throw new ImportError('IMPORT_INTERRUPTED', 'The host connection ended before confirming the import. Check the campaign before retrying.');
+    }
+  } catch (error) {
+    if (error instanceof ImportError || signal?.aborted) throw error;
+    throw new ImportError('IMPORT_INTERRUPTED', 'The host connection ended before confirming the import. Check the campaign before retrying.');
+  } finally { await reader.cancel().catch(() => {}); }
 }
 
 export function getFiveEToolsMapBooks(data, baseUrl) {
@@ -80,6 +130,7 @@ function flattenMapSource(source = {}, baseUrl) {
         height: Number(image.height) || 0,
         grid: image.grid || null,
         mapRegions: image.mapRegions || parentImage?.mapRegions || [],
+        mapParent: image.mapParent || null,
         mapRegionWidth: Number(image.mapRegions ? image.width : parentImage?.width) || Number(image.width) || 0,
         mapRegionHeight: Number(image.mapRegions ? image.height : parentImage?.height) || Number(image.height) || 0,
         searchText: [
@@ -104,7 +155,7 @@ function getMapDisplayTitle(imageType, rawTitle, parentTitle) {
 }
 
 export function getFiveEToolsImageUrl(baseUrl, href = {}) {
-  if (href.type === 'external') return href.url || '';
+  if (href.type === 'external') return /^https?:\/\//i.test(href.url || '') ? href.url : '';
   if (!href.path) return '';
   const encodedPath = href.path.split('/').map(encodeURIComponent).join('/');
   return `${normalizeFiveEToolsBaseUrl(baseUrl)}img/${encodedPath}`;
@@ -147,7 +198,8 @@ export function getFiveEToolsMapRegionWalls(map, dimensions = getFiveEToolsMapBo
       if (seen.has(key)) return;
       seen.add(key);
       walls.push({
-        id: `wall-map-${region.area || regionIndex}-${index}`,
+        id: `wall-map-${regionIndex}-${index}`,
+        estimated: true,
         start: point,
         end: next,
       });
@@ -157,7 +209,7 @@ export function getFiveEToolsMapRegionWalls(map, dimensions = getFiveEToolsMapBo
   return walls;
 }
 
-export function makeFiveEToolsMapBoard(map, assetPath) {
+export function makeFiveEToolsMapBoard(map, assetPath, { useRegionWalls = false } = {}) {
   const dimensions = getFiveEToolsMapBoardDimensions(map);
   return {
     ...makeBoard(map.displayTitle || 'Imported Map'),
@@ -176,7 +228,7 @@ export function makeFiveEToolsMapBoard(map, assetPath) {
     },
     lighting: {
       ...defaultLighting,
-      walls: getFiveEToolsMapRegionWalls(map, dimensions),
+      walls: useRegionWalls ? getFiveEToolsMapRegionWalls(map, dimensions) : [],
     },
     doors: [],
     tokens: [],
@@ -187,12 +239,18 @@ export function makeFiveEToolsMapBoard(map, assetPath) {
       sourceName: map.sourceName,
       chapterName: map.chapterName,
       imageType: map.imageType,
+      grid: map.grid,
+      mapRegions: map.mapRegions,
+      mapParent: map.mapParent,
+      width: map.width,
+      height: map.height,
+      regionWallsEstimated: useRegionWalls,
     },
   };
 }
 
 function pointToBoard(point, regionWidth, regionHeight, dimensions) {
-  if (!Array.isArray(point) || point.length < 2) return null;
+  if (!Array.isArray(point) || point.length < 2 || !point.slice(0, 2).every((n) => Number.isFinite(Number(n)))) return null;
   return {
     x: clampWallCoordinate((Number(point[0]) / regionWidth) * dimensions.columns, dimensions.columns),
     y: clampWallCoordinate((Number(point[1]) / regionHeight) * dimensions.rows, dimensions.rows),

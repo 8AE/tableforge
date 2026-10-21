@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useImportAttempt } from '../hooks/useImportAttempt';
+import { ImportFeedback } from './ImportFeedback';
+import { ImportError } from '../lib/importErrors';
 import { BookOpen, CheckSquare, Image, Library, Square } from 'lucide-react';
 import {
   fetchFiveEToolsMaps,
@@ -20,7 +23,8 @@ export function FiveEToolsMapImporter({
   const [catalog, setCatalog] = useState(null);
   const [loadedBaseUrl, setLoadedBaseUrl] = useState('');
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
-  const [error, setError] = useState('');
+  const attempts = useImportAttempt();
+  const [useRegionWalls, setUseRegionWalls] = useState(false);
   const [bookFilter, setBookFilter] = useState('');
   const [selectedBookId, setSelectedBookId] = useState('');
   const [selectedMapIds, setSelectedMapIds] = useState(new Set());
@@ -37,33 +41,49 @@ export function FiveEToolsMapImporter({
   const selectedBook = books.find((book) => book.id === selectedBookId) || null;
   const selectedMaps = selectedBook?.maps.filter((map) => selectedMapIds.has(map.id)) || [];
 
-  const loadCatalog = async () => {
-    setError('');
-    setIsLoadingCatalog(true);
-    try {
-      const normalizedBaseUrl = normalizeFiveEToolsBaseUrl(baseUrl);
-      const data = await fetchFiveEToolsMaps(normalizedBaseUrl);
-      setCatalog(data);
-      setLoadedBaseUrl(normalizedBaseUrl);
-      setMapResults([]);
-      return data;
-    } catch (loadError) {
-      setError(loadError.message || 'Unable to load the 5e.tools map catalog.');
-      return null;
-    } finally {
-      setIsLoadingCatalog(false);
-    }
+  const resetSource = (value) => {
+    attempts.clear();
+    setIsLoadingCatalog(false);
+    setCatalog(null);
+    setLoadedBaseUrl('');
+    setSelectedBookId('');
+    setSelectedMapIds(new Set());
+    setMapResults([]);
+    onBaseUrlChange(value);
   };
 
-  useEffect(() => {
-    loadCatalog();
-  }, []);
+  const loadCatalog = async (searchQuery = null) => {
+    const attempt = attempts.begin(searchQuery === null ? 'Load map catalog' : 'Search maps');
+    setIsLoadingCatalog(true);
+    setCatalog(null);
+    setSelectedBookId('');
+    setSelectedMapIds(new Set());
+    setMapResults([]);
+    let notice = '';
+    try {
+      const normalizedBaseUrl = normalizeFiveEToolsBaseUrl(baseUrl);
+      const data = await fetchFiveEToolsMaps(normalizedBaseUrl, { signal: attempt.controller.signal, onNotice: (message) => { notice = message; } });
+      if (!attempts.isCurrent(attempt)) return;
+      setCatalog(data);
+      setLoadedBaseUrl(normalizedBaseUrl);
+      if (searchQuery !== null) {
+        const matches = flattenFiveEToolsMapData(data, normalizedBaseUrl).filter((map) => map.searchText.includes(searchQuery)).slice(0, 30);
+        setMapResults(matches);
+        attempts.finish(attempt, `${matches.length ? `Found ${matches.length} maps (up to 30 shown).` : 'No matching maps found. Try another title or campaign.'}${notice ? ` ${notice}` : ''}`, notice ? 'warning' : 'success');
+      } else {
+        attempts.finish(attempt, `Loaded ${getFiveEToolsMapBooks(data, normalizedBaseUrl).length} books from ${normalizedBaseUrl}.${notice ? ` ${notice}` : ''}`, notice ? 'warning' : 'success');
+      }
+    } catch (error) { attempts.fail(attempt, error); }
+    finally { if (attempts.isCurrent(attempt)) setIsLoadingCatalog(false); }
+  };
+
+  useEffect(() => { loadCatalog(); }, []);
 
   const selectBook = (bookId) => {
     setSelectedBookId(bookId);
     const book = books.find((item) => item.id === bookId);
     setSelectedMapIds(new Set(book?.maps.map((map) => map.id) || []));
-    setError('');
+    attempts.clear();
   };
 
   const toggleMap = (mapId) => {
@@ -76,36 +96,31 @@ export function FiveEToolsMapImporter({
   };
 
   const searchMaps = async () => {
+    if (isLoadingCatalog || isImporting) return;
     const query = mapQuery.trim().toLowerCase();
-    if (!query) return;
-    setError('');
-    const normalizedBaseUrl = normalizeFiveEToolsBaseUrl(baseUrl);
-    const data = catalog && loadedBaseUrl === normalizedBaseUrl ? catalog : await loadCatalog();
-    if (!data) return;
-    const matches = flattenFiveEToolsMapData(data, normalizedBaseUrl)
-      .filter((map) => map.searchText.includes(query))
-      .slice(0, 30);
-    setMapResults(matches);
-    if (!matches.length) setError('No matching maps found.');
+    if (!query) {
+      const attempt = attempts.begin('Search maps');
+      attempts.fail(attempt, new ImportError('SEARCH_REQUIRED', 'Enter a map or campaign name before searching.'));
+      return;
+    }
+    await loadCatalog(query);
   };
 
   const runImport = async (maps, book = null) => {
-    if (!maps.length || isImporting) return;
-    setError('');
+    if (!maps.length || isImporting || isLoadingCatalog) return;
+    const attempt = attempts.begin(maps.length === 1 ? 'Import map' : 'Import campaign maps');
     setIsImporting(true);
     setProgress({ completed: 0, total: maps.length, map: null });
     try {
       const result = await onImportMaps(maps, {
-        book,
-        baseUrl: normalizeFiveEToolsBaseUrl(baseUrl),
-        onProgress: setProgress,
+        book, baseUrl: loadedBaseUrl, useRegionWalls, signal: attempt.controller.signal,
+        onProgress: (value) => { if (attempts.isCurrent(attempt)) setProgress(value); },
       });
-      if (result?.ok === false) setError(result.error || 'Unable to import the selected maps.');
-    } catch (importError) {
-      setError(importError.message || 'Unable to import the selected maps.');
-    } finally {
-      setIsImporting(false);
-      setProgress(null);
+      if (result?.ok === false) throw new ImportError(result.code || 'IMPORT_FAILED', result.error || 'Unable to import the selected maps.');
+      attempts.finish(attempt, `Imported ${maps.length} map${maps.length === 1 ? '' : 's'}.`);
+    } catch (error) { attempts.fail(attempt, error); }
+    finally {
+      if (attempts.isCurrent(attempt)) { setIsImporting(false); setProgress(null); }
     }
   };
 
@@ -126,15 +141,16 @@ export function FiveEToolsMapImporter({
         <div className="fiveetools-base-url-row">
           <label>
             5e.tools base URL
-            <input value={baseUrl} onChange={(event) => onBaseUrlChange(event.target.value)} />
+            <input value={baseUrl} onChange={(event) => resetSource(event.target.value)} disabled={isImporting} />
           </label>
-          <button className="command" type="button" onClick={loadCatalog} disabled={isLoadingCatalog || isImporting}>
+          <button className="command" type="button" onClick={() => loadCatalog()} disabled={isLoadingCatalog || isImporting}>
             <Library size={16} /> {isLoadingCatalog ? 'Loading...' : 'Reload catalog'}
           </button>
         </div>
 
         {mode === 'book' ? (
           <>
+            <p className="empty-note">Creates boards from the book’s DM and player maps. Adventure text, encounters, and monsters are not included.</p>
             <div className="fiveetools-book-picker">
               <label>
                 Filter campaign books
@@ -142,7 +158,7 @@ export function FiveEToolsMapImporter({
               </label>
               <label>
                 Campaign book
-                <select value={selectedBookId} onChange={(event) => selectBook(event.target.value)} disabled={isLoadingCatalog || !books.length}>
+                <select value={selectedBookId} onChange={(event) => selectBook(event.target.value)} disabled={isLoadingCatalog || isImporting || !books.length}>
                   <option value="">Select a campaign book...</option>
                   {visibleBooks.map((book) => (
                     <option key={book.id} value={book.id}>{book.name} ({book.maps.length} maps)</option>
@@ -192,7 +208,7 @@ export function FiveEToolsMapImporter({
           <>
             <label>
               Search maps
-              <input value={mapQuery} onChange={(event) => setMapQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') searchMaps(); }} placeholder="Cragmaw Hideout, Castle Ravenloft..." autoFocus />
+              <input value={mapQuery} onChange={(event) => { setMapQuery(event.target.value); setMapResults([]); attempts.clear(); }} disabled={isLoadingCatalog || isImporting} onKeyDown={(event) => { if (event.key === 'Enter') searchMaps(); }} placeholder="Cragmaw Hideout, Castle Ravenloft..." autoFocus />
             </label>
             <button className="command" type="button" title="Search the 5e.tools maps gallery" onClick={searchMaps} disabled={isLoadingCatalog || isImporting}>
               <Library size={16} /> {isLoadingCatalog ? 'Loading...' : 'Search maps'}
@@ -218,12 +234,17 @@ export function FiveEToolsMapImporter({
           </>
         )}
 
+        <label className="fiveetools-region-option">
+          <input type="checkbox" checked={useRegionWalls} onChange={(event) => setUseRegionWalls(event.target.checked)} disabled={isImporting} />
+          Use map area outlines as estimated walls
+        </label>
+        <p className="empty-note">5etools areas are clickable regions, not measured walls or doors. Review any estimates before enabling lighting. Grid dimensions are estimates; hex grids, offsets, and unusual scales may need adjustment in Board Settings. Original grid metadata is retained.</p>
         {progress && (
           <p className="fiveetools-import-progress" role="status">
             Importing {Math.min(progress.completed + 1, progress.total)} of {progress.total}{progress.map?.displayTitle ? `: ${progress.map.displayTitle}` : ''}
           </p>
         )}
-        {error && <p className="form-error">{error}</p>}
+        <ImportFeedback feedback={attempts.feedback} />
       </div>
     </div>
   );

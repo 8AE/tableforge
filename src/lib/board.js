@@ -181,7 +181,7 @@ export function normalizeLibraryToken(token = {}) {
 function normalizeTokenMeta(meta) {
   if (!meta || typeof meta !== 'object') return null;
   const normalized = {};
-  ['cr', 'type', 'sizeName', 'ac', 'hp', 'source', 'origin'].forEach((key) => {
+  ['cr', 'type', 'sizeName', 'ac', 'hp', 'source', 'origin', 'importKey'].forEach((key) => {
     if (meta[key] != null && meta[key] !== '') normalized[key] = String(meta[key]);
   });
   return Object.keys(normalized).length ? normalized : null;
