@@ -118,10 +118,65 @@ export function fiveEToolsMonsterResult(monster, baseUrl) {
   };
 }
 
-export async function searchFiveEToolsMonsters(query, baseUrl, options = {}) {
-  const base = normalizeFiveEToolsBaseUrl(baseUrl);
+async function fetchBestiaryIndex(base, options) {
   const { data: index, dataBase } = await fetchFiveEToolsData(base, 'data/bestiary/index.json', options);
   if (!index || Array.isArray(index) || typeof index !== 'object' || !Object.values(index).length || !Object.values(index).every((file) => typeof file === 'string' && /^[\w.-]+\.json$/.test(file))) throw new ImportError('INVALID_BESTIARY_INDEX', 'The source did not return a valid bestiary index. Check the site root URL and update its data.');
+  return { index, dataBase };
+}
+
+export function parseFiveEToolsMonsterUrl(value) {
+  const invalid = () => new ImportError('INVALID_MONSTER_URL', 'Paste a full creature URL, such as https://5e.tools/bestiary.html#goblin_mm or http://localhost:5050/bestiary.html#goblin_mm. Open a monster or NPC in the bestiary and copy its address.');
+  let url;
+  try { url = new URL(String(value || '').trim()); } catch { throw invalid(); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !/\/bestiary\.html$/i.test(url.pathname)) throw invalid();
+  const [creature, ...settings] = url.hash.slice(1).split(',');
+  const separator = creature.lastIndexOf('_');
+  if (separator < 1) throw invalid();
+  let name, source;
+  try {
+    name = decodeURIComponent(creature.slice(0, separator)).trim().toLowerCase();
+    source = decodeURIComponent(creature.slice(separator + 1)).trim().toLowerCase();
+  } catch { throw invalid(); }
+  if (!name || !source) throw invalid();
+  return { baseUrl: normalizeFiveEToolsBaseUrl(url.href), name, source, hasScaling: settings.some((setting) => /^scaled(?:spellsummon|classsummon)?:/i.test(setting)) };
+}
+
+export async function fetchFiveEToolsMonsterFromUrl(creatureUrl, options = {}) {
+  const { baseUrl, name, source, hasScaling } = parseFiveEToolsMonsterUrl(creatureUrl);
+  const { index, dataBase } = await fetchBestiaryIndex(baseUrl, options);
+  const filesBySource = new Map(Object.entries(index).map(([book, file]) => [book.toLowerCase(), file]));
+  const loadedFiles = new Set();
+  const monsters = new Map();
+  const loadSource = async (book) => {
+    const file = filesBySource.get(book.toLowerCase());
+    if (!file) throw new ImportError('MONSTER_SOURCE_NOT_FOUND', `This installation does not contain the ${book} bestiary source. Check the creature URL or update its data.`);
+    if (loadedFiles.has(file)) return;
+    const data = await fetchFiveEToolsJson(`${dataBase}data/bestiary/${file}`, { signal: options.signal });
+    if (!Array.isArray(data?.monster)) throw new ImportError('INVALID_BESTIARY_DATA', `${file} is not a bestiary data file. Update the source installation.`);
+    for (const monster of data.monster) monsters.set(key(monster), monster);
+    loadedFiles.add(file);
+  };
+  await loadSource(source);
+  const monster = monsters.get(key({ name, source }));
+  if (!monster) throw new ImportError('MONSTER_NOT_FOUND', `No creature named "${name}" from ${source} was found at this site. Copy the URL again or update the installation's bestiary data.`);
+  // Load just this book and any books referenced by its copy chain.
+  let parent = monster;
+  const visited = new Set();
+  while (parent?._copy && !visited.has(key(parent))) {
+    visited.add(key(parent));
+    const reference = parent._copy;
+    if (!monsters.has(key(reference))) await loadSource(reference.source);
+    parent = monsters.get(key(reference));
+  }
+  const templates = monster._copy ? await fetchFiveEToolsJson(`${dataBase}data/bestiary/template.json`, { signal: options.signal }) : {};
+  const result = fiveEToolsMonsterResult(resolveFiveEToolsMonster(monster, monsters, templates.monsterTemplate || []), baseUrl);
+  if (hasScaling) options.onNotice?.('This link includes creature scaling. The imported quick stats use the original creature.');
+  return result;
+}
+
+export async function searchFiveEToolsMonsters(query, baseUrl, options = {}) {
+  const base = normalizeFiveEToolsBaseUrl(baseUrl);
+  const { index, dataBase } = await fetchBestiaryIndex(base, options);
   const files = [...new Set(Object.values(index))];
   const controller = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;

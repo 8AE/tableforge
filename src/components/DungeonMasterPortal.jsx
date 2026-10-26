@@ -392,7 +392,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
     setTokenGridError('');
     setState((current) => updateActiveBoard(current, (active) => ({ ...active, tokens: [...active.tokens, token] })));
     selectTarget({ type: 'token', id: token.id }, token.layer === 'dm' ? 'gm' : 'token');
-    if (libraryMode === 'pick') {
+    if (libraryMode === 'pick' || libraryMode === 'create') {
       setLibraryMode(null);
       setPendingTokenCell(null);
     }
@@ -1479,7 +1479,7 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           imageAssets={imageAssets}
           isUploadingAsset={isUploadingAsset}
           onUploadImage={(event, onAssetReady) => uploadAssetForUse(event, 'token', onAssetReady)}
-          onImportToken={(libraryToken) => importLibraryToken(libraryToken, libraryMode === 'pick' ? pendingTokenCell : null)}
+          onImportToken={(libraryToken) => importLibraryToken(libraryToken, libraryMode === 'pick' || libraryMode === 'create' ? pendingTokenCell : null)}
           onUpdateToken={updateLibraryToken}
           onDeleteToken={deleteLibraryToken}
           onAddLibraryToken={async (libraryToken, options) => {
@@ -1500,6 +1500,11 @@ export function DungeonMasterPortal({ state, projects = [], openProjectId, setSt
           onUploadImage={(event, onAssetReady) => uploadAssetForUse(event, 'token', onAssetReady)}
           onCancel={() => { setIsCreateTokenOpen(false); setPendingTokenCell(null); }}
           onCreate={handleCreateToken}
+          onImportFromFiveETools={(draft) => {
+            setTokenDraft(draft);
+            setIsCreateTokenOpen(false);
+            setLibraryMode('create');
+          }}
         />
       )}
 

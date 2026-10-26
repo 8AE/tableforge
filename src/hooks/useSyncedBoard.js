@@ -52,7 +52,9 @@ export function useSyncedBoard() {
       ...project,
       state: migrateState(project.state),
     }));
-    setProjects(mergeProjects(incomingProjects));
+    const nextProjects = mergeProjects(incomingProjects);
+    projectsRef.current = nextProjects;
+    setProjects(nextProjects);
     setPlayerProjectId(payload.openProjectId || null);
     setIsLoading(false);
   }, [mergeProjects]);
@@ -345,13 +347,17 @@ export function useSyncedBoard() {
     const nextProject = projectsRef.current.find((project) => project.id === selectedProjectIdRef.current);
     if (!nextProject) return;
     const updatedProject = { ...nextProject, state: nextState, updatedAt: new Date().toISOString() };
-    setProjects((items) => items.map((project) => project.id === updatedProject.id ? updatedProject : project));
+    const nextProjects = projectsRef.current.map((project) => project.id === updatedProject.id ? updatedProject : project);
+    projectsRef.current = nextProjects;
+    setProjects(nextProjects);
     persistProject(updatedProject);
   };
 
   const setState = (updater, options = {}) => {
-    if (!state) return;
-    const current = state;
+    // An import may commit a new library/asset list before React renders again.
+    // Follow-up placement must update that committed state, not the old render.
+    const current = projectsRef.current.find((project) => project.id === selectedProjectIdRef.current)?.state;
+    if (!current) return;
     const next = migrateState(typeof updater === 'function' ? updater(current) : updater);
     if (!options.skipHistory) {
       setPast((items) => [...items.slice(-39), current]);

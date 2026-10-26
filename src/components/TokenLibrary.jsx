@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Copy, Image, Pencil, Plus, RotateCw, Search, Trash2, X } from 'lucide-react';
 import { areTokenAndBoardCompatible, incompatibleTokenGridMessage, isHexBoard, normalizeLibraryToken } from '../lib/board';
 
-import { searchFiveEToolsMonsters, searchOpen5eMonsters, monsterResultToLibraryToken } from '../lib/fiveEToolsMonsters';
+import { fetchFiveEToolsMonsterFromUrl, searchFiveEToolsMonsters, searchOpen5eMonsters, monsterResultToLibraryToken } from '../lib/fiveEToolsMonsters';
 import { ImportError } from '../lib/importErrors';
 import { useImportAttempt } from '../hooks/useImportAttempt';
 import { ImportFeedback } from './ImportFeedback';
@@ -109,10 +109,12 @@ export function TokenLibraryModal({
   onAddLibraryToken,
   onClose,
 }) {
-  const [activeTab, setActiveTab] = useState('saved');
+  const [activeTab, setActiveTab] = useState(mode === 'create' ? 'search' : 'saved');
   const [librarySearch, setLibrarySearch] = useState('');
   const [editingTokenId, setEditingTokenId] = useState(null);
   const [source, setSource] = useState('5etools');
+  const [importMethod, setImportMethod] = useState('search');
+  const [creatureUrl, setCreatureUrl] = useState('');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const searchAttempts = useImportAttempt();
@@ -122,6 +124,9 @@ export function TokenLibraryModal({
   const [isSearching, setIsSearching] = useState(false);
   const [savedKeys, setSavedKeys] = useState(() => new Set());
   const editingToken = tokenLibrary.find((token) => token.id === editingTokenId) || null;
+  const isPlacing = mode === 'pick' || mode === 'create';
+  const isDirectUrl = source === '5etools' && importMethod === 'url';
+  const findSavedResult = (result) => tokenLibrary.find((token) => token.meta?.importKey === result.key || (token.label === result.name && token.meta?.source === result.source && token.meta?.origin === result.origin));
 
   useEffect(() => {
     if (!editingTokenId) return undefined;
@@ -154,33 +159,43 @@ export function TokenLibraryModal({
   const runSearch = async () => {
     if (isSearching || savingKey) return;
     saveAttempts.clear();
-    const attempt = searchAttempts.begin(source === 'open5e' ? 'Search Open 5e' : 'Search 5etools bestiary');
+    const attempt = searchAttempts.begin(isDirectUrl ? 'Load 5etools creature' : source === 'open5e' ? 'Search Open 5e' : 'Search 5etools bestiary');
     const trimmed = query.trim().toLowerCase();
     setResults([]);
     setPreviewErrors(new Set());
-    if (!trimmed) { searchAttempts.fail(attempt, new ImportError('SEARCH_REQUIRED', 'Enter a monster name before searching.')); return; }
+    if (!isDirectUrl && !trimmed) { searchAttempts.fail(attempt, new ImportError('SEARCH_REQUIRED', 'Enter a monster or NPC name before searching.')); return; }
     setIsSearching(true);
-    let notice = '';
+    const notices = [];
     try {
-      const options = { signal: attempt.controller.signal, onNotice: (message) => { notice = message; } };
-      const matches = source === 'open5e'
-        ? await searchOpen5eMonsters(trimmed, options)
-        : await searchFiveEToolsMonsters(trimmed, fiveEToolsBaseUrl, options);
+      const options = { signal: attempt.controller.signal, onNotice: (message) => notices.push(message) };
+      const matches = isDirectUrl
+        ? [await fetchFiveEToolsMonsterFromUrl(creatureUrl, options)]
+        : source === 'open5e'
+          ? await searchOpen5eMonsters(trimmed, options)
+          : await searchFiveEToolsMonsters(trimmed, fiveEToolsBaseUrl, options);
       if (!searchAttempts.isCurrent(attempt)) return;
       setResults(matches);
-      searchAttempts.finish(attempt, `${matches.length ? `Found ${matches.length} monster${matches.length === 1 ? '' : 's'} (up to 30 shown).` : 'No matching monsters found. Try another name.'}${notice ? ` ${notice}` : ''}`, notice ? 'warning' : 'success');
+      const message = isDirectUrl ? `Loaded ${matches[0].name} (${matches[0].source}).` : matches.length ? `Found ${matches.length} monster${matches.length === 1 ? '' : 's'} (up to 30 shown).` : 'No matching monsters found. Try another name.';
+      searchAttempts.finish(attempt, [message, ...notices].join(' '), notices.length ? 'warning' : 'success');
     } catch (error) { searchAttempts.fail(attempt, error); }
     finally { if (searchAttempts.isCurrent(attempt)) setIsSearching(false); }
   };
 
   const saveResult = async (result) => {
     if (savingKey) return;
+    const existing = findSavedResult(result);
+    if (existing) {
+      if (isPlacing) onImportToken(existing);
+      return;
+    }
     const attempt = saveAttempts.begin(`Save ${result.name}`);
     setSavingKey(result.key);
     try {
-      await onAddLibraryToken(monsterResultToLibraryToken(result, monsterTypeColor(result.type)), { signal: attempt.controller.signal });
+      const saved = await onAddLibraryToken(monsterResultToLibraryToken(result, monsterTypeColor(result.type)), { signal: attempt.controller.signal });
+      if (!saveAttempts.isCurrent(attempt)) return;
       setSavedKeys((keys) => new Set([...keys, result.key]));
       saveAttempts.finish(attempt, `${result.name} saved to this campaign${result.image ? ' with a local copy of its artwork' : ' (this entry has no token artwork)'}.`);
+      if (isPlacing) onImportToken(saved.token);
     } catch (error) { saveAttempts.fail(attempt, error); }
     finally { if (saveAttempts.isCurrent(attempt)) setSavingKey(null); }
   };
@@ -190,14 +205,14 @@ export function TokenLibraryModal({
       <div className="library-modal token-library-modal">
         <header className="library-modal-header">
           <div>
-            <strong>{mode === 'pick' ? 'Place a Library Token' : 'Token Library'}</strong>
-            <span>{mode === 'pick' ? 'Pick a saved token to place on the selected cell.' : `${tokenLibrary.length} saved token${tokenLibrary.length === 1 ? '' : 's'} in this project`}</span>
+            <strong>{mode === 'create' ? 'Import a Monster or NPC' : mode === 'pick' ? 'Place a Library Token' : 'Token Library'}</strong>
+            <span>{mode === 'create' ? 'Imported creatures are saved to your library and placed on the selected cell.' : mode === 'pick' ? 'Pick a saved token or import a creature to place on the selected cell.' : `${tokenLibrary.length} saved token${tokenLibrary.length === 1 ? '' : 's'} in this project`}</span>
           </div>
           <nav className="library-tabs" aria-label="Token library sections">
-            <button type="button" className={activeTab === 'saved' ? 'active' : ''} onClick={() => setActiveTab('saved')}>
+            <button type="button" className={activeTab === 'saved' ? 'active' : ''} disabled={Boolean(savingKey)} onClick={() => setActiveTab('saved')}>
               Saved Tokens ({tokenLibrary.length})
             </button>
-            <button type="button" className={activeTab === 'search' ? 'active' : ''} onClick={() => setActiveTab('search')}>
+            <button type="button" className={activeTab === 'search' ? 'active' : ''} disabled={Boolean(savingKey)} onClick={() => setActiveTab('search')}>
               Find Monsters
             </button>
           </nav>
@@ -260,11 +275,11 @@ export function TokenLibraryModal({
                             <div className="token-table-actions">
                               <button
                                 className="command accent"
-                                title={compatible ? (mode === 'pick' ? 'Place this token on the selected cell' : 'Add this token to the active board') : incompatibleTokenGridMessage(token, board)}
+                                title={compatible ? (isPlacing ? 'Place this token on the selected cell' : 'Add this token to the active board') : incompatibleTokenGridMessage(token, board)}
                                 disabled={!compatible}
                                 onClick={() => onImportToken(token)}
                               >
-                                <Plus size={15} /> {mode === 'pick' ? 'Place' : 'Import'}
+                                <Plus size={15} /> {isPlacing ? 'Place' : 'Import'}
                               </button>
                               {mode === 'manage' && (
                                 <>
@@ -305,28 +320,53 @@ export function TokenLibraryModal({
                 <button type="button" className={source === 'open5e' ? 'active' : ''} disabled={Boolean(savingKey)} onClick={() => { setSource('open5e'); clearSearch(); }}>Open 5e</button>
               </div>
               {source === '5etools' ? (
-                <label className="base-url-field">
-                  5e.tools base URL
-                  <input value={fiveEToolsBaseUrl || 'https://5e.tools/'} disabled={Boolean(savingKey)} onChange={(event) => { onChangeFiveEToolsBaseUrl(event.target.value); clearSearch(); }} />
-                </label>
+                <>
+                  <div className="source-toggle" role="group" aria-label="5etools import method">
+                    <button type="button" className={importMethod === 'search' ? 'active' : ''} aria-pressed={importMethod === 'search'} disabled={Boolean(savingKey)} onClick={() => { setImportMethod('search'); clearSearch(); }}>Search by name</button>
+                    <button type="button" className={importMethod === 'url' ? 'active' : ''} aria-pressed={importMethod === 'url'} disabled={Boolean(savingKey)} onClick={() => { setImportMethod('url'); clearSearch(); }}>Paste creature URL</button>
+                  </div>
+                  {!isDirectUrl && (
+                    <label className="base-url-field">
+                      5e.tools base URL
+                      <input value={fiveEToolsBaseUrl || 'https://5e.tools/'} disabled={Boolean(savingKey)} onChange={(event) => { onChangeFiveEToolsBaseUrl(event.target.value); clearSearch(); }} />
+                    </label>
+                  )}
+                </>
               ) : (
                 <p className="empty-note">Searches the public Open 5e API (api.open5e.com) — SRD and open-license monsters.</p>
               )}
               <div className="monster-search-row">
-                <label className="token-search">
-                  <Search size={15} />
-                  <input
-                    autoFocus
-                    placeholder="Goblin, dragon, bandit..."
-                    value={query}
-                    disabled={Boolean(savingKey)} onChange={(event) => { setQuery(event.target.value); clearSearch(); }}
-                    onKeyDown={(event) => { if (event.key === 'Enter') runSearch(); }}
-                  />
-                </label>
+                {isDirectUrl ? (
+                  <label className="creature-url-field">
+                    Full creature URL
+                    <input
+                      autoFocus
+                      type="url"
+                      placeholder="https://5e.tools/bestiary.html#goblin_mm"
+                      value={creatureUrl}
+                      disabled={Boolean(savingKey)}
+                      onChange={(event) => { setCreatureUrl(event.target.value); clearSearch(); }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') runSearch(); }}
+                    />
+                  </label>
+                ) : (
+                  <label className="token-search">
+                    <Search size={15} />
+                    <input
+                      autoFocus
+                      aria-label="Monster or NPC name"
+                      placeholder="Goblin, dragon, bandit..."
+                      value={query}
+                      disabled={Boolean(savingKey)} onChange={(event) => { setQuery(event.target.value); clearSearch(); }}
+                      onKeyDown={(event) => { if (event.key === 'Enter') runSearch(); }}
+                    />
+                  </label>
+                )}
                 <button className="command" onClick={runSearch} disabled={isSearching || Boolean(savingKey)}>
-                  {isSearching ? 'Searching...' : 'Search'}
+                  {isDirectUrl ? isSearching ? 'Loading...' : 'Load creature' : isSearching ? 'Searching...' : 'Search'}
                 </button>
               </div>
+              {isDirectUrl && <p className="empty-note">Open a monster or NPC in 5eTools and paste its full address, including the part after #. Public sites and locally hosted installations are supported.</p>}
               <ImportFeedback feedback={searchAttempts.feedback} />
               <ImportFeedback feedback={saveAttempts.feedback} />
             </div>
@@ -345,7 +385,9 @@ export function TokenLibraryModal({
                   </thead>
                   <tbody>
                     {results.map((result) => {
-                      const alreadySaved = savedKeys.has(result.key) || tokenLibrary.some((token) => token.meta?.importKey === result.key || (token.label === result.name && token.meta?.source === result.source && token.meta?.origin === result.origin));
+                      const existing = findSavedResult(result);
+                      const alreadySaved = savedKeys.has(result.key) || Boolean(existing);
+                      const compatible = !isPlacing || areTokenAndBoardCompatible(existing || { tokenKind: 'creature' }, board);
                       return (
                         <tr key={result.key}>
                           <td>
@@ -368,11 +410,11 @@ export function TokenLibraryModal({
                             <div className="token-table-actions">
                               <button
                                 className={alreadySaved ? 'command' : 'command accent'}
-                                title={alreadySaved ? 'Already saved to the library' : 'Save this monster into the project token library'}
-                                disabled={alreadySaved || Boolean(savingKey)}
+                                title={!compatible ? incompatibleTokenGridMessage(existing || { tokenKind: 'creature' }, board) : isPlacing ? alreadySaved ? 'Place the saved library token on the selected cell' : 'Save this creature to the library and place it on the selected cell' : alreadySaved ? 'Already saved to the library' : 'Save this monster into the project token library'}
+                                disabled={!compatible || (!isPlacing && alreadySaved) || Boolean(savingKey)}
                                 onClick={() => saveResult(result)}
                               >
-                                <Plus size={15} /> {alreadySaved ? 'Saved' : savingKey === result.key ? 'Saving...' : 'Save'}
+                                <Plus size={15} /> {savingKey === result.key ? 'Saving...' : isPlacing ? alreadySaved ? 'Place' : 'Save & place' : alreadySaved ? 'Saved' : 'Save'}
                               </button>
                             </div>
                           </td>
@@ -384,8 +426,8 @@ export function TokenLibraryModal({
               )}
               {!results.length && !isSearching && !searchAttempts.feedback && (
                 <div className="library-empty">
-                  <strong>Search for monsters</strong>
-                  <span>Results show CR, AC, HP, and source so you can pick the right stat block before saving it.</span>
+                  <strong>{isDirectUrl ? 'Import a creature from its URL' : 'Search for monsters and NPCs'}</strong>
+                  <span>{isDirectUrl ? 'Load the exact creature and source book from the link, then save it to your library.' : 'Results show CR, AC, HP, and source so you can pick the right stat block before saving it.'}</span>
                 </div>
               )}
             </div>
@@ -514,7 +556,7 @@ function TokenEditModal({ token, imageAssets, isUploadingAsset, onUploadImage, o
   );
 }
 
-export function TokenCreateModal({ board, initialDraft, imageAssets, isUploadingAsset, onUploadImage, onCancel, onCreate }) {
+export function TokenCreateModal({ board, initialDraft, imageAssets, isUploadingAsset, onUploadImage, onCancel, onCreate, onImportFromFiveETools }) {
   const hexBoard = isHexBoard(board);
   const [draft, setDraft] = useState(() => {
     const base = initialDraft || {};
@@ -556,6 +598,12 @@ export function TokenCreateModal({ board, initialDraft, imageAssets, isUploading
           <button title="Cancel" onClick={onCancel}><X size={18} /></button>
         </header>
         <div className="popup-modal-body">
+          {!hexBoard && (
+            <div className="new-token-import">
+              <button type="button" className="command accent" onClick={() => onImportFromFiveETools(draft)}><Search size={16} /> Import from 5eTools</button>
+              <p className="empty-note">Import a monster or NPC with its artwork and quick stats. It is automatically saved to your library.</p>
+            </div>
+          )}
           <label>
             Type
             <select value={draft.tokenKind} onChange={(event) => setDraft({ ...draft, tokenKind: event.target.value })}>

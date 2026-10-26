@@ -768,8 +768,23 @@ input[type="range"] {
 
 .monster-search-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  align-items: center;
+  align-items: end;
+}
+
+.creature-url-field {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.monster-search-row > label {
+  margin-bottom: 0;
+}
+
+.new-token-import {
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(245, 243, 237, 0.14);
 }
 
 .monster-search-row .command {

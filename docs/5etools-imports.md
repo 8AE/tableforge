@@ -6,12 +6,14 @@ Use the **5e.tools base URL** field to select the source installation. For a loc
 
 - **Create from 5e.tools campaign** creates a campaign from the selected book's maps. All DM and player versions are selected initially; exclude any you do not want before importing.
 - **Import from 5e.tools → Campaign book** adds the chosen maps to an existing campaign. **Single map** searches map titles and campaign names and adds one board.
-- **Token library → Find Monsters → 5e.tools** searches the bestiary and saves a token with CR, AC, HP, size, type, darkvision and source. Copied monsters inherit these quick stats, including supported template changes. Artwork is downloaded into the campaign before the token is marked saved. Entries without token artwork can still be saved.
+- **Place Token → click a cell → New token → Import from 5eTools** imports a monster or NPC. Choose **Save & place** to save it to the campaign token library and place it on the clicked cell. If that creature is already saved, **Place** reuses its library entry and downloaded artwork.
+- **Token library → Find Monsters → 5e.tools** offers the same two import methods. **Search by name** uses the configured base URL and searches the bestiary. **Paste creature URL** loads the exact creature and source book from a full address such as `https://5e.tools/bestiary.html#goblin_mm` or `http://localhost:5050/bestiary.html#goblin_mm`. Subfolder installations are supported, such as `http://localhost:5050/Rules/bestiary.html#goblin_mm`. Copy the address after opening the creature, including its `#name_source` fragment. The link chooses its own installation without changing the saved search base URL.
+- Imported creatures include CR, AC, HP, size, type, darkvision and source. Copied monsters and NPCs inherit these quick stats, including supported template changes across source books. Artwork is downloaded into the campaign before the token is marked saved or placed. Entries without token artwork can still be saved. Managing the library uses **Save** without placing a board token; importing while choosing a cell uses **Save & place**. Creature tokens use the 5 ft square grid.
 - **Assets** accepts downloaded source images through the normal upload control. Supported image formats are PNG, JPEG and WebP. Audio/video uploads retain the existing MP3, WAV, MP4, WebM and MOV support.
 
 Imported map and token artwork uses local campaign asset paths and travels with campaign ZIP exports. Adding maps to an existing campaign preserves its published player board. Creating a new campaign opens it in the same way as normal campaign creation.
 
-Campaign imports contain map boards, not adventure text, encounters or automatically placed monsters. The bestiary imports quick stats, not complete stat blocks. Search results show up to 30 entries; narrow the search when needed.
+Campaign imports contain map boards, not adventure text, encounters or automatically placed monsters. The bestiary imports quick stats, not complete stat blocks. Search results show up to 30 entries; narrow the search when needed. Direct creature links select an exact name and source without this search limit. Links with scaling settings import the original creature's quick stats and show a notice. Creatures must be present in the chosen installation's bestiary data; browser-only homebrew is not included automatically.
 
 5etools map regions are clickable adventure areas, not measured walls. They remain in each board's `fiveETools` metadata. **Use map area outlines as estimated walls** is optional and off by default. Review estimates before using lighting; doors and lights cannot be inferred from those regions. Grid dimensions are estimates, especially when source grids use hexagons, offsets or unusual scales. Original grid metadata is retained for reference.
 
@@ -24,6 +26,8 @@ Map batches save only after every selected image downloads successfully. A failu
 | Code | Meaning and next step |
 | --- | --- |
 | `INVALID_URL` | Enter a complete HTTP(S) site URL without embedded login credentials. |
+| `INVALID_MONSTER_URL` | Copy the full HTTP(S) bestiary creature address, including `bestiary.html#name_source`. |
+| `MONSTER_SOURCE_NOT_FOUND` / `MONSTER_NOT_FOUND` | The linked book or creature is absent from this installation. Check the link or update its bestiary data. |
 | `HOST_UNREACHABLE` | The browser cannot reach Tableforge. Start/reconnect to its host. |
 | `SOURCE_UNREACHABLE` | Tableforge cannot connect to the source. Check the URL and start the local 5etools server. |
 | `SOURCE_TIMEOUT` | A source download exceeded the time limit. Check the source and retry. |
@@ -48,9 +52,12 @@ Run the automated tests and build:
 ```sh
 npm test
 npm run build
+npm run test:e2e
 ```
 
 The HTTP integration tests start disposable hosts and use temporary project storage. They exercise HTTP failures, malformed JSON/images, timeouts, size limits, fresh request IDs, failed/cancelled batch cleanup, retries, preserved player selection, token duplicate prevention, and artwork persistence through campaign ZIP export/import.
+
+The creature browser tests use a disposable local source and campaign store. They cover both import methods from New Token, exact cell placement, inherited NPC stats, automatic library saving, artwork persistence, reuse without duplicates, undo/redo, export, invalid links, failed artwork and retry, and cancellation when switching import methods. Run just these checks with `npm run test:e2e -- e2e/monster-import.spec.js`. If the bundled Playwright browser is unavailable, use installed Chrome with `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e`.
 
 To compare against an installed 5etools source tree with images:
 
