@@ -1078,6 +1078,7 @@ export function BoardCanvas({
                 height: tokenBox.height,
                 backgroundColor: token.image || isVehicle ? 'transparent' : token.color,
                 '--tile-size': `${tile}px`,
+                '--token-size': `${Math.min(tokenBox.width, tokenBox.height)}px`,
                 '--vehicle-surface-width': `${vehicleSurfaceWidth}px`,
                 '--vehicle-surface-height': `${vehicleSurfaceHeight}px`,
                 ...motion.style,
@@ -1107,7 +1108,7 @@ export function BoardCanvas({
                     {view === 'dm' && <span className="vehicle-token-grid" />}
                   </span>
                 </>
-              ) : token.image ? <img src={token.image} alt="" draggable="false" /> : <span>{token.label}</span>}
+              ) : token.image ? <img src={token.image} alt="" draggable="false" /> : <span className="token-label">{token.label}</span>}
             </button>
             );
           })}
