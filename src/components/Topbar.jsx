@@ -113,8 +113,8 @@ export function Topbar({
         )}
         {mode === 'dm' && <a className="ghost-link" href={playerUrl} target="_blank" rel="noreferrer"><Users size={16} /> Open player view</a>}
         {mode === 'player' && <button type="button" title={navigationVisible ? 'Hide board navigation controls' : 'Show board navigation controls'} aria-pressed={navigationVisible} onClick={onToggleNavigation}><Hand size={16} /> Navigation</button>}
-        {mode === 'player' && <button title="Rotate board counter clockwise" onClick={onRotateLeft}><RotateCcw size={16} /> Rotate</button>}
-        {mode === 'player' && <button title="Rotate board clockwise" onClick={onRotateRight}><RotateCw size={16} /> Rotate</button>}
+        {mode === 'player' && <button type="button" title="Rotate the board 90 degrees counter-clockwise" aria-label="Rotate board counter-clockwise" onClick={onRotateLeft}><RotateCcw size={16} aria-hidden="true" /> Rotate left</button>}
+        {mode === 'player' && <button type="button" title="Rotate the board 90 degrees clockwise" aria-label="Rotate board clockwise" onClick={onRotateRight}><RotateCw size={16} aria-hidden="true" /> Rotate right</button>}
         {mode === 'player' && <button onClick={onFullscreen}><Expand size={16} /> Full screen</button>}
       </div>
       {mode === 'dm' && isDrawerOpen && (
